@@ -14,14 +14,21 @@ Authors:
 #define TALKER client_comm.comm_fd[TALKER_INDEX]
 #define LISTENER client_comm.comm_fd[LISTENER_INDEX]
 
-#define CMD_DATA_PREP(OP1,OP2,STR) strcpy(STR,"");	\
+#define CMD_DATA_PREP(OP1,OP2,OP3,OP4,STR) strcpy(STR,"");	\
 					strcat(STR,OP1);	\
 					strcat(STR,DELIMITER_CMD);	\
 					strcat(STR,OP2);	\
-					strcat(STR,DELIMITER_CMD);
+					strcat(STR,DELIMITER_CMD); \
+					if(cmd_type == 2)	\
+					{	\
+						strcat(STR,OP3);	\
+						strcat(STR,DELIMITER_CMD);	\
+						strcat(STR,OP4);	\
+						strcat(STR,DELIMITER_CMD); \
+					}	\
 
 
-int  get_next_command(int my_pid,int cmd_cnt, int *cmd_type,char *song_name, char *song_url)
+int  get_next_command(int my_pid,int cmd_cnt, int *cmd_type,char *song_name, char *song_url,char *new_name, char *new_url)
 {
 	FILE *fp;
 	char filename[FILENAME_LENGTH];
@@ -30,7 +37,7 @@ int  get_next_command(int my_pid,int cmd_cnt, int *cmd_type,char *song_name, cha
 	char *line=NULL;
 	ssize_t read;
 	char *tok;
-	char *data;
+	char *data,*op_args;
 	
 	
 	strcpy(filename,COMMAND_FILE_PREFIX);
@@ -75,6 +82,12 @@ int  get_next_command(int my_pid,int cmd_cnt, int *cmd_type,char *song_name, cha
 	{
 		strcpy(song_name,strtok_r(op_args,DELIMITER_ARGS,&tok));
 		strcpy(song_url,strtok_r(NULL,DELIMITER_ARGS,&tok));
+
+		if(*cmd_type == 2)
+		{
+			strcpy(new_name,strtok_r(NULL,DELIMITER_ARGS,&tok));
+			strcpy(new_url,strtok_r(NULL,DELIMITER_ARGS,&tok));
+		}
 	}
 	else
 	{
@@ -238,6 +251,8 @@ int main(int argc, char **argv)
 	struct COMMAND_ITEM command; //might be needed to store all commands for session guarantee
 	char song_name[MAX_INPUT_LENGTH];
 	char song_url[MAX_INPUT_LENGTH];
+	char new_name[MAX_INPUT_LENGTH];
+	char new_url[MAX_INPUT_LENGTH];
 	int cmd_type=-1;
 
 //thread related
@@ -294,7 +309,7 @@ while(1)
 	printf("Client id %d: Command counter:%d\n",my_pid,command_counter);
 #endif
 	//populate acc_name, cmd_type and arguments to perform the command
-	ret = get_next_command(my_pid,command_counter,&cmd_type,song_name,song_url);
+	ret = get_next_command(my_pid,command_counter,&cmd_type,song_name,song_url,new_name,new_url);
 	if(ret == -1)
 	{
 
@@ -302,7 +317,7 @@ while(1)
 		break;
 	}
 
-	CMD_DATA_PREP(song_name,song_url,command.command_data);
+	CMD_DATA_PREP(song_name,song_url,new_name,new_url,command.command_data);
 	command.command_id = GET_NEXT_CMD_ID;
 	command.command_type = (enum COMMAND_TYPE) cmd_type;
 	command_counter++;

@@ -21,7 +21,9 @@
 #define DEBUG 1
 
 #define COMMAND_FILE_PREFIX "command_list_"
-#define RESOURCE_FILE_PREFIX "rep"
+#define LOG_FILE_PREFIX "log_"
+#define SLOG_FILE_PREFIX "stable_log_"
+#define RESOURCE_FILE_PREFIX "db"
 #define FILENAME_LENGTH 100
 #define COMMAND_LENGTH 1000
 
@@ -33,7 +35,7 @@
 
 #define MAX_CLIENTS 2
 #define MAX_SERVERS 2
-
+#define MAX_LEVELS 100
 #define CLIENT_PORT_STARTER 5000
 #define SERVER_PORT_STARTER 8000
 
@@ -60,14 +62,22 @@ enum COMMAND_TYPE
 {
 	COMMAND_ADD=0,
 	COMMAND_DELETE=1,
-	COMMAND_EDIT=2   //READ ONLY
+	COMMAND_EDIT=2
 };
-
 struct COMMAND_ITEM
 {
 	int command_id;
+	int timestamp;
 	enum COMMAND_TYPE command_type;
 	char command_data[BUFSIZE];
 };
-
+enum LOG_CMD
+{
+	LOG_ENTRY=0,
+	LOG_DELETE=1,
+};
+struct SERVER_ID {
+	int level;
+	int id[MAX_LEVELS];
+};
 #endif
