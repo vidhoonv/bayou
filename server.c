@@ -17,31 +17,216 @@ Authors:
 #define PERFORM_COMMAND(command) \
 			printf("\nIN PERFORM COMMAND %d\n",command.command_id); \
 			rc = do_command(my_pid,command.command_type,command.command_data);	\
-			printf("\n>>>>>>>>Performed command %d res:%d\n",command,rc); \
+			printf("\n>>>>>>>>Performed command %d res:%d\n",command.command_id,rc); \
 			respond(my_pid,TALKER,command.command_id,client_addr[command.command_id%MAX_CLIENTS],client_addr_len[command.command_id%MAX_CLIENTS],rc);	
 
-#define PREPARE_IDSTR(STR)	\
+#define PREPARE_IDSTR(serverid,STR,DL)	\
 			i = 0;	\
 			strcpy(STR,"");	\
-			while(i <= my_serverid.level)	\
+			while(i <= serverid.level)	\
 			{	\
-				sprintf(STR,"%s%d",STR,my_serverid.id[i]);	\
-				strcat(STR,DELIMITER_SEC);	\
+				sprintf(STR,"%s%d",STR,serverid.id[i]);	\
+				strcat(STR,DL);	\
 				i++;	\
 			}	
 
-/*int log_command(struct LOG_CMD cmd,int command_id, time_t start_time)
+#define CREATE_ENTROPY_TIMER \
+				edata.server_comm = &server_comm;	\
+				printf("****** fd: %d %d\n",edata.server_comm->comm_fd[TALKER_INDEX],server_comm.comm_fd[TALKER_INDEX]);\
+				edata.parent_id = parent_id;	\
+				edata.my_pid = my_pid;	\
+				entropy_data = (void*)(&edata);	\
+				sevp.sigev_notify = SIGEV_THREAD;	\
+				sevp.sigev_value.sival_ptr = entropy_data;	\
+				sevp.sigev_notify_function = &init_anti_entropy;	\
+				sevp.sigev_notify_attributes = NULL;	\
+				timer_create(clkid,&sevp,&entropy_timer);
+
+#define PREPARE_VVSTR()	\
+			sprintf(log_str,"%d",my_version_vector.csn);	\
+			strcat(log_str,DELIMITER_SEC);	\
+			for(i=0;i<my_version_vector.server_count;i++)	\
+			{	\
+				PREPARE_IDSTR(my_version_vector.servers[i],idstring,DELIMITER_TER);	\
+				strcat(log_str,idstring);	\
+				strcat(log_str,DELIMITER_SEC);	\
+				sprintf(log_str,"%s%d",log_str,my_version_vector.recent_timestamp[i]);	\
+				strcat(log_str,DELIMITER_SEC);	\
+			}	
+
+#define EXTRACT_SERVERID(STR,sid,DL)	\
+			sid.level = 0;	\
+			id_data = strtok_r(STR,DL,&tok2);	\
+			sid.level = 0;	\
+			while(id_data)	\
+			{	\
+				sid.id[sid.level] = atoi(id_data);	\
+				sid.level++;	\
+				id_data = strtok_r(NULL,DL,&tok2);	\
+			}	\
+			
+			
+			
+//globals
+char log_str[BUFSIZE];
+//version vector
+	struct VERSION_VECTOR my_version_vector;
+	char idstring[BUFSIZE/2];
+//server and client addr related
+	struct sockaddr_in *server_addr_in[MAX_SERVERS],*client_addr_in[MAX_CLIENTS];
+	struct sockaddr server_addr[MAX_SERVERS],client_addr[MAX_CLIENTS];
+	socklen_t server_addr_len[MAX_SERVERS],client_addr_len[MAX_CLIENTS];	
+
+struct COMM_DATA server_comm;
+
+bool equal_serverID(struct SERVER_ID s1,struct SERVER_ID s2)
 {
-	FILE *fp,,*fptemp;
+	int i=0;
+	
+	if(s1.level == s2.level)
+	{
+		for(i=0;i<s1.level;i++)
+		{
+
+			if(s1.id[i] == s2.id[i])
+				continue;
+			else
+				return false;
+		}
+		return true;
+
+	}
+return false;
+}
+bool copy_serverID(struct SERVER_ID dest,struct SERVER_ID src)
+{
+	int i=0;
+
+	dest.level = src.level;
+	for(i=0;i<src.level;i++)
+	{	
+		dest.id[i] = src.id[i];	
+
+	}
+return true;
+}
+bool compare_serverID(struct SERVER_ID s1,struct SERVER_ID s2)
+{
+	int i=0;
+
+	if(s1.level<s2.level)
+		return true;
+	if(s1.level == s2.level)
+	{
+		for(i=s1.level-1;i>=0;i--)
+		{	
+			if(s1.id[i] > s2.id[i])
+				return false;
+			else if(s1.id[i] < s2.id[i])
+				return true;
+		}
+	}
+return true;
+}
+
+bool log_insert(FILE *fp,FILE *fptemp,char *record)
+{
+	
+	char *idstr,*cmd_str,*id_data;
+	char *log_idstr,*log_cmd_str;
+	char *log_data;
+	int log_ts,ts;
+	bool fail=false,inserted=false;
+
+	char rcopy[BUFSIZE],lncopy[BUFSIZE];
+	int i=0;
+	size_t len;
+	char *line=NULL,*data,*tok2;
+	ssize_t read;
+	
+	struct SERVER_ID serv,log_serv;
+	//the file is open
+	
+	//fetch ts, serverID from record
+	strcpy(rcopy,record);
+	printf("\nlog insert ==========> %s %s\n",rcopy,record);
+	data = strtok(rcopy,DELIMITER);
+	if(data)
+		ts = atoi(data);
+
+	idstr = strtok(NULL,DELIMITER);
+	cmd_str = strtok(NULL,DELIMITER);
+
+	
+	EXTRACT_SERVERID(idstr,serv,DELIMITER_SEC);					
+		
+	fail=true; inserted=false;
+	//iterate over each log record and find position of received record
+	while(( read = getline(&line,&len,fp)) != -1)
+	{
+		if(line[strlen(line)-1] == '\n')
+			line[strlen(line)-1]='\0';
+			
+			strcpy(lncopy,line);
+
+			//get ts and server id
+			log_data = strtok(line,DELIMITER);
+			log_ts = atoi(log_data);
+
+			//compare ts , then server id
+			log_idstr = strtok(NULL,DELIMITER);
+			EXTRACT_SERVERID(log_idstr,log_serv,DELIMITER_SEC);
+			
+			//printf("line:%s rec:%s\n",line,record);
+			if(ts < log_ts && !inserted)
+			{
+				printf("insert position found -inserting\n");
+				fprintf(fptemp,"%s\n",record);
+				fail = false;
+				inserted =true;
+				continue;
+			}
+			else if(ts == log_ts && !inserted)
+			{
+
+				//check server ids to decide position
+
+				if(compare_serverID(serv,log_serv))
+				{
+					//serv has high priority
+					printf("insert position found -inserting\n");
+					fprintf(fptemp,"%s\n",record);
+					fail = false;
+					inserted = true;
+					continue;
+
+				}
+
+			}
+			fprintf(fptemp,"%s\n",lncopy);
+	}
+	if(!inserted)
+	{
+		//insert entry at the end of the log
+		printf("\nHERE ==========> %s %s\n",rcopy,record);
+		fprintf(fptemp,"%s\n",record);
+		fail = false;
+		inserted = true;
+	}
+	return (inserted);	
+}
+int log_command(enum LOG_CMD cmd,int my_pid,char *record)
+{
+	FILE *fp,*fptemp;
 	char filename[FILENAME_LENGTH];
 	char tempname[FILENAME_LENGTH];
-	int i=0,;
+	int i=0;
 	size_t len;
 	char *line=NULL,*data;
 	ssize_t read;
 	bool fail=false;
 	time_t curr_time;
-
+	
 	strcpy(filename,LOG_FILE_PREFIX);
 	sprintf(filename,"%s%d",filename,my_pid);
 	strcat(filename,".log");
@@ -61,12 +246,93 @@ Authors:
 
 		case LOG_ADD: 
 				//log add entry
-				//<timestamp>:<server id>:<command id>
-				//get current time to calculate accept timestamp
+								
+				fprintf(fp,"%s\n",record);
+				fclose(fp);
+				break;
+
+		case LOG_INSERT:
+				fptemp = fopen(tempname,"a+");
+				if(fptemp == NULL)
+				{
+					printf("file could not be accessed\n");
+					return -1;
+				}	
+
+				log_insert(fp,fptemp,record);
+				fclose(fptemp);
+				fclose(fp);
+				if(unlink(filename) == -1)  //deleting old res file
+					printf("deleting old resource file failed\n");
+				else
+					printf("old res file deleted\n");
+				if(rename(tempname,filename) == -1) //rename 
+					printf("new resource file rename failed\n");
+				else
+					printf("new resource file ready\n");
+				break;
+		case LOG_FETCH:
+				
+				break;
+		default:
+			break;
+
+	}
 				
 				
 return 0;
-}*/
+}
+int slog_command(enum LOG_CMD cmd,int my_pid,char *record)
+{
+	FILE *fp,*fptemp;
+	char filename[FILENAME_LENGTH];
+	char tempname[FILENAME_LENGTH];
+	int i=0;
+	size_t len;
+	char *line=NULL,*data;
+	ssize_t read;
+	bool fail=false;
+
+	
+	strcpy(filename,SLOG_FILE_PREFIX);
+	sprintf(filename,"%s%d",filename,my_pid);
+	strcat(filename,".log");
+
+	strcpy(tempname,"temp");
+	sprintf(tempname,"%s%d",tempname,my_pid);
+	strcat(tempname,".log");
+
+	fp = fopen(filename,"a+");
+	if(fp == NULL)
+	{
+		printf("file could not be accessed\n");
+		return -1;
+	}	
+	switch(cmd)
+	{
+
+		case LOG_ADD: 
+				//log add entry
+							
+				fprintf(fp,"%s\n",record);
+				fclose(fp);
+				break;
+
+		case LOG_INSERT:
+				
+			
+				break;
+		case LOG_FETCH:
+				
+				break;
+		default:
+				break;
+
+	}
+				
+				
+return 0;
+}
 int do_command(int my_pid,int cmd_type,char* cmd_data)
 {
 	FILE *fp,*fptemp;
@@ -338,9 +604,258 @@ bool configure_server(int my_pid,struct COMM_DATA *comm_replica)
 return true;
 }
 
+void init_anti_entropy(union sigval args)
+{
+
+	struct ENTROPY_INPUT *data;	
+	struct COMM_DATA *server_comm;
+	int parent_id,my_pid,i,ret;
+	char send_buff[BUFSIZE];
+	
+	data = (struct ENTROPY_INPUT*)(args.sival_ptr);
+	
+	server_comm = data->server_comm;
+	parent_id = data->parent_id;
+	my_pid =  data->my_pid;
+	
+	
+	PREPARE_VVSTR();
+
+	
+	//send create write
+	//sending create write to client
+	strcpy(send_buff,"ENTROPY");
+	strcat(send_buff,DELIMITER);
+	sprintf(send_buff,"%s%d",send_buff,my_pid);
+	strcat(send_buff,DELIMITER);
+	strcat(send_buff,log_str);
+	strcat(send_buff,DELIMITER);
+	
+	
+	printf("Server %d: Sending entropy  to SERVER %d \n",my_pid,parent_id);
+	ret = sendto(server_comm->comm_fd[TALKER_INDEX], send_buff, strlen(send_buff), 0, 
+  			(struct sockaddr *)&server_addr[parent_id], server_addr_len[parent_id]);
+					
+	if (ret < 0)
+	{
+		perror("sendto ");
+	        close(server_comm->comm_fd[TALKER_INDEX]);
+	}
+	//cleanup
+	strcpy(log_str,"");
+
+}
+
+bool send_message(int talker_fd,struct sockaddr dest_addr, socklen_t dest_addr_len,char *send_buff)
+{
+	int ret=0;
+	
+	ret = sendto(TALKER, send_buff, strlen(send_buff), 0, 
+  			(struct sockaddr *)&dest_addr, dest_addr_len);
+					
+	if (ret < 0)
+	{
+		perror("sendto ");
+	        close(talker_fd);
+	}
+	
+}
+bool process_logs(struct VERSION_VECTOR recv_vv, struct VERSION_VECTOR my_vv, int recv_pid,int my_pid)
+{
+
+	FILE *fp_log,*fp_slog;
+	char log_fname[FILENAME_LENGTH],slog_fname[FILENAME_LENGTH];
+	int i=0;
+	size_t len;
+	char *line=NULL,*data;
+	ssize_t read;
+	bool fail=false;
+
+	int csn;
+	char *idstr,*id_data;
+	int ts;
+	char *cmd_str,*tok2;
+	struct SERVER_ID serv;
+	int serv_ts = -1;
+	int line_count = 0;
+
+	char send_buff[BUFSIZE];
+	char lncopy[BUFSIZE];	
+
+	strcpy(log_fname,LOG_FILE_PREFIX);
+	sprintf(log_fname,"%s%d",log_fname,my_pid);
+	strcat(log_fname,".log");
+
+	strcpy(slog_fname,SLOG_FILE_PREFIX);
+	sprintf(slog_fname,"%s%d",slog_fname,my_pid);
+	strcat(slog_fname,".log");	
+	
+	fp_log = fopen(log_fname,"a+");
+	if(fp_log == NULL)
+	{
+		printf("log file could not be accessed\n");
+		return -1;
+	}
+
+	fp_slog = fopen(slog_fname,"a+");
+	if(fp_slog == NULL)
+	{
+		printf("slog file could not be accessed\n");
+		return -1;
+	}		
+	
+	
+//process stable log
+	line_count = 0;
+	if(my_vv.csn > recv_vv.csn)
+	{
+		//I have some stable writes that partner might not know
+		//stable log line format
+		// csn:acceptTS:serverID:command_data
+		while(( read = getline(&line,&len,fp_slog)) != -1)
+		{
+			if(line_count<recv_vv.csn)
+			{
+				line_count++;
+				continue;
+			}
+			if(line[strlen(line)-1] == '\n')
+				line[strlen(line)-1]='\0';
+
+
+			strcpy(lncopy,line);
+
+			data = strtok(lncopy,DELIMITER);
+			if(data)
+				csn = atoi(data);
+			
+			data = strtok(NULL,DELIMITER);
+			if(data)	
+				ts = atoi(data);
+
+			idstr = strtok(NULL,DELIMITER);
+			cmd_str = strtok(NULL,DELIMITER);
+
+			
+			EXTRACT_SERVERID(idstr,serv,DELIMITER_SEC);	
+			
+			for(i=0;i<recv_vv.server_count;i++)
+			{
+				if(equal_serverID(recv_vv.servers[i],serv))
+				{
+
+					serv_ts = recv_vv.recent_timestamp[i];
+					break;
+				}
+				
+			}
+			
+	
+			if(ts <= serv_ts)
+			{
+				//send commit notification
+				//copy log line as is
+				//COMMIT_NOTIFICATION:<SENDER_ID>:<WRITE_LOG>:
+				strcpy(send_buff,"COMMIT_NOTIFICATION");
+				strcat(send_buff,DELIMITER);
+				sprintf(send_buff,"%s%d",send_buff,my_pid);
+				strcat(send_buff,DELIMITER);
+				strcat(send_buff,line); //check line contents and change
+				strcat(send_buff,DELIMITER);
+				printf("Server %d: Sending commit notification to server %d \n",my_pid,recv_pid);
+				send_message(TALKER,server_addr[recv_pid],server_addr_len[recv_pid],send_buff);
+			}
+			else
+			{
+
+					if(serv_ts == -1) //the receiving server's version vector does not have an entry for the server
+					{
+
+						printf("the receiving server's version vector does not have an entry for the server!\n");
+					}
+				//send write log entry
+				//send commit notification
+				//copy log line as is
+				//ENTROPY_MSG:<SENDER_ID>:<WRITE_LOG>:
+				strcpy(send_buff,"ENTROPY_SMSG");
+				strcat(send_buff,DELIMITER);
+				sprintf(send_buff,"%s%d",send_buff,my_pid);
+				strcat(send_buff,DELIMITER);
+				strcat(send_buff,line); //check line contents and change
+				strcat(send_buff,DELIMITER);
+				printf("Server %d: Sending WRITE LOG(STABLE) to server %d \n",my_pid,recv_pid);
+				send_message(TALKER,server_addr[recv_pid],server_addr_len[recv_pid],send_buff);
+			}
+			//reset value
+			serv_ts = -1;
+						
+		}	
+		
+
+	}
+
+
+//process tentative log
+	while(( read = getline(&line,&len,fp_log)) != -1)
+	{
+
+		if(line[strlen(line)-1] == '\n')
+				line[strlen(line)-1]='\0';
+
+
+			strcpy(lncopy,line);
+
+			data = strtok(lncopy,DELIMITER);
+						
+			if(data)	
+				ts = atoi(data);
+
+			idstr = strtok(NULL,DELIMITER);
+			cmd_str = strtok(NULL,DELIMITER);
+
+			
+			EXTRACT_SERVERID(idstr,serv,DELIMITER_SEC);	
+			
+			for(i=0;i<recv_vv.server_count;i++)
+			{
+				if(equal_serverID(recv_vv.servers[i],serv))
+				{
+
+					serv_ts = recv_vv.recent_timestamp[i];
+					break;
+				}
+				
+			}
+
+			if(ts > serv_ts)
+			{
+				if(serv_ts == -1) //the receiving server's version vector does not have an entry for the server
+				{
+
+						printf("the receiving server's version vector does not have an entry for the server!\n");
+				}
+				//send commit notification
+				//copy log line as is
+				//COMMIT_NOTIFICATION:<SENDER_ID>:<WRITE_LOG>:
+				strcpy(send_buff,"ENTROPY_TMSG");
+				strcat(send_buff,DELIMITER);
+				sprintf(send_buff,"%s%d",send_buff,my_pid);
+				strcat(send_buff,DELIMITER);
+				strcat(send_buff,line); //check line contents and change
+				strcat(send_buff,DELIMITER);
+				printf("Server %d: Sending WRITE LOG(TENTATIVE) to server %d \n",my_pid,recv_pid);
+				send_message(TALKER,server_addr[recv_pid],server_addr_len[recv_pid],send_buff);
+			}
+			//reset values
+			serv_ts = -1;
+
+
+	}
+}
+
 int main(int argc, char **argv)
 {
-	struct COMM_DATA server_comm;
+	
 	int my_pid,parent_id;
 	struct SERVER_ID my_serverid;
 	char my_id_str[BUFSIZE/2];
@@ -361,21 +876,32 @@ int main(int argc, char **argv)
 
 //comm sending variables
 	char send_buff[BUFSIZE];
-	struct sockaddr_in *server_addr_in[MAX_SERVERS],*client_addr_in[MAX_CLIENTS];
-	struct sockaddr server_addr[MAX_SERVERS],client_addr[MAX_CLIENTS];
-	socklen_t server_addr_len[MAX_SERVERS],client_addr_len[MAX_CLIENTS];	
+
 
 //commands
 	struct COMMAND_ITEM command_list[MAX_COMMANDS];
 	struct COMMAND_ITEM command;
 	int command_counter = 0;
 //misc
-	int i,ret=0,recv_pid;
+	int i,k=0,ret=0,recv_pid;
 	char buff_copy[BUFSIZE];
-	char idstring[BUFSIZE/2];
-	char *data,*cstr,*cmd_str,*tok,*idstr,*id_data;
+	char *data,*cstr,*cmd_str,*tok,*tok1,*tok2,*idstr,*id_data,*vv_str,*vv_data;
+	char command_str[BUFSIZE/2];
+	char log_record[BUFSIZE];
+	void *entropy_data;
+	struct ENTROPY_INPUT edata;
+	struct VERSION_VECTOR recv_vv;
+	struct SERVER_ID serv;
+	int ts=0;
 //time - logical clock
 	int my_current_time = 0;
+
+//timer
+	timer_t entropy_timer;
+	struct sigevent sevp;
+	clockid_t clkid =  CLOCK_REALTIME;
+	struct itimerspec entropy_timer_val,old_val;
+	int tret = 0;
 
 //check runtime arguments
 	if(argc!=3)
@@ -426,7 +952,25 @@ int main(int argc, char **argv)
 		printf("Error in config of server id: %d\n",my_pid);
 		return -1;
 	}
+//init timer args
+	entropy_timer_val.it_value.tv_sec = 5;
+	entropy_timer_val.it_value.tv_nsec = 0;
+	entropy_timer_val.it_interval.tv_sec = 5;
+	entropy_timer_val.it_interval.tv_nsec = 0;
 
+	if(!entropy_timer)
+		CREATE_ENTROPY_TIMER;
+//intial values for version vector 
+	my_version_vector.server_count = 0;
+	my_version_vector.csn = -1;
+	for(i=0;i<MAX_SERVERS;i++)
+	{
+		my_version_vector.servers[i].level = -1;
+		my_version_vector.recent_timestamp[i] = -1;
+	
+		recv_vv.servers[i].level = -1;
+		recv_vv.recent_timestamp[i] = -1;
+	}
 
 //DO CREATE WRITE and get INITIAL TIMESTAMP
 if(parent_id == my_pid)
@@ -438,7 +982,7 @@ if(parent_id == my_pid)
 	//INIT current time
 	my_current_time = my_serverid.id[my_serverid.level];
 
-	PREPARE_IDSTR(my_id_str);
+	PREPARE_IDSTR(my_serverid,my_id_str,DELIMITER_SEC);
 }
 else
 {
@@ -506,6 +1050,17 @@ else
 
 
 				//LOG CREATE WRITE (update time)
+				//<infinity>:<timestamp>:<my_id_str>
+				
+				sprintf(log_record,"%d",INFINITY);
+				strcat(log_record,DELIMITER);	
+				sprintf(log_record,"%s%d",log_record,my_current_time);
+				strcat(log_record,DELIMITER);
+				strcat(log_record,my_id_str);
+				strcat(log_record,DELIMITER);
+
+				slog_command(LOG_ADD,my_pid,log_record);
+				//increment time
 				my_current_time++;
 
 				//send ID to new server
@@ -537,21 +1092,17 @@ else
 				//CREATED:<SERVER_ID>:<ID_STR>:
 				//retrive id string
 				idstr = strtok(NULL,DELIMITER);
-				id_data = strtok(idstr,DELIMITER_SEC);
-				my_serverid.level = 0;
-				while(id_data)
-				{
-					my_serverid.id[my_serverid.level] = atoi(id_data);
-					my_serverid.level++;
-					id_data = strtok(NULL,DELIMITER_SEC);
-
-				}					
-				my_serverid.level--;
+				EXTRACT_SERVERID(idstr,my_serverid,DELIMITER_SEC);
 				//INIT current time
 				my_current_time = my_serverid.id[my_serverid.level]+1;
 				//prepare ID string 
-				PREPARE_IDSTR(my_id_str);
+				PREPARE_IDSTR(my_serverid,my_id_str,DELIMITER_SEC);
 				printf("I created myself successfully - idstr:%s currtime:%d\n",my_id_str,my_current_time);
+			
+				//start entropy timer
+				tret = timer_settime(entropy_timer,0,&entropy_timer_val,&old_val);
+				
+				
 			}
 			else if(strcmp(data,"REQUEST") == 0)
 			{
@@ -561,7 +1112,7 @@ else
 
 				//retrive command string
 				cstr = strtok(NULL,DELIMITER);
-
+				strcpy(command_str,cstr);
 				command_list[command_counter].command_id = atoi(strtok(cstr,DELIMITER_SEC));
 
 				command_list[command_counter].command_type = (enum COMMAND_TYPE)atoi(strtok(NULL,DELIMITER_SEC));
@@ -572,10 +1123,139 @@ else
 				my_current_time++;
 
 				//log the write request
+				//<timestamp>:<server id>:<command str>
 				
+				sprintf(log_record,"%d",my_current_time);
+				strcat(log_record,DELIMITER);	
+				strcat(log_record,my_id_str);
+				strcat(log_record,DELIMITER);
+				strcat(log_record,command_str);
+				strcat(log_record,DELIMITER);
+
+				log_command(LOG_ADD,my_pid,log_record);
+
 				//perform command tentatively and send result to client
 				command = command_list[command_counter];
 				PERFORM_COMMAND(command);
+
+				
+
+			}
+			else if(strcmp(data,"ENTROPY") == 0)
+			{
+				//recved from server
+				//expects data in the format
+				//ENTROPY:<SERVER_ID>:<CSN>:<VERSION_VECTOR>:
+				
+				data = strtok(NULL,DELIMITER);
+				if(data)
+				{
+					recv_vv.csn = atoi(data);
+				}
+				else
+				{
+
+					printf("error: csn not found!");
+				}
+
+				vv_str = strtok(NULL,DELIMITER);
+
+				if(vv_str)
+				{
+					vv_data = strtok_r(vv_str,DELIMITER_SEC,&tok);
+					k=0;
+					while(vv_data)
+					{
+					//<server_id,timestamp>
+
+					idstr = strtok_r(vv_data,DELIMITER_SEC,&tok1);
+
+					EXTRACT_SERVERID(idstr,recv_vv.servers[k],DELIMITER_TER);
+
+					recv_vv.recent_timestamp[k] = atoi(strtok_r(NULL,DELIMITER_SEC,&tok1));
+
+
+					vv_data = strtok_r(NULL,DELIMITER_SEC,&tok);
+					k++;
+					}
+
+				}
+				else
+				{
+
+					printf("new server - no version vector entries found!");
+				}				
+				if(process_logs(recv_vv,my_version_vector,recv_pid,my_pid)) //bool process_logs(struct VERSION_VECTOR recv_vv, struct VERSION_VECTOR my_vv, int recv_pid,int my_pid)
+				{
+
+					printf("anti entropy messages sent!");
+
+				}
+				else
+				{
+					printf("error: while sending anti entropy messages");
+
+				}
+				
+
+				
+
+			}
+			else if(strcmp(data,"ENTROPY_TMSG") == 0 )
+			{
+				//ENTROPY_TMSG:SENDER_ID:TIMESTAMP:SERVER_ID:COMMAND_STR
+				printf("recv buff %s\n",recv_buff);
+				strcpy(log_record,recv_buff);
+				data = strtok(NULL,DELIMITER);
+				if(data)
+					ts = atoi(data);
+
+				idstr = strtok(NULL,DELIMITER);
+				cmd_str = strtok(NULL,DELIMITER);
+
+			
+				EXTRACT_SERVERID(idstr,serv,DELIMITER_SEC);					
+		
+				// do log insert for the received write log in tentative log
+				data=strtok_r(log_record,DELIMITER,&tok);
+				data=strtok_r(NULL,DELIMITER,&tok);
+				printf("!!!!! log record %s\n",tok);
+				log_command(LOG_INSERT,my_pid,tok);
+
+				//update version vector
+				
+				//updating timestamp
+				for(i=0;i<my_version_vector.server_count;i++)
+				{
+					if(equal_serverID(my_version_vector.servers[i],serv))
+					{
+
+						my_version_vector.recent_timestamp[i] = ts;
+						break;
+					}
+				
+				}
+				if(i == my_version_vector.server_count)
+				{
+					//server did not have an entry for the write log's server
+					copy_serverID(my_version_vector.servers[my_version_vector.server_count],serv);
+
+					my_version_vector.recent_timestamp[my_version_vector.server_count] = ts;
+
+					my_version_vector.server_count++;
+				}
+					
+				
+			}
+			else if(strcmp(data,"ENTROPY_SMSG") == 0)
+			{
+
+
+			}
+			else if(strcmp(data,"COMMIT_NOTIFICATION") == 0)
+			{
+
+
 
 			}
 		} 

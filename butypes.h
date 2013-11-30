@@ -30,11 +30,12 @@
 
 #define DELIMITER ":"
 #define DELIMITER_SEC ";"
+#define DELIMITER_TER "|"
 #define DELIMITER_CMD "-"
 #define DELIMITER_ARGS "/"  //used only for command list (input file)
 
 #define MAX_CLIENTS 2
-#define MAX_SERVERS 2
+#define MAX_SERVERS 6
 #define MAX_LEVELS 100
 #define CLIENT_PORT_STARTER 5000
 #define SERVER_PORT_STARTER 8000
@@ -46,6 +47,7 @@
 
 #define MAX_COMMANDS 1000
 #define MAX_INPUT_LENGTH 200
+#define INFINITY 999999999
 
 #define GET_NEXT_CMD_ID command_counter*MAX_CLIENTS+my_pid 
 #define MYSERVER(my_pid) 0
@@ -73,11 +75,24 @@ struct COMMAND_ITEM
 };
 enum LOG_CMD
 {
-	LOG_ENTRY=0,
-	LOG_DELETE=1,
+	LOG_ADD=0,
+	LOG_INSERT=1,
+	LOG_FETCH=2
 };
 struct SERVER_ID {
 	int level;
 	int id[MAX_LEVELS];
+};
+struct VERSION_VECTOR {
+	int server_count;
+	int csn;
+	struct SERVER_ID servers[MAX_SERVERS];
+	int recent_timestamp[MAX_SERVERS];
+
+};
+struct ENTROPY_INPUT{
+	struct COMM_DATA *server_comm;
+	int parent_id;
+	int my_pid;
 };
 #endif
