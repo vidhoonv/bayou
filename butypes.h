@@ -23,6 +23,7 @@
 #define COMMAND_FILE_PREFIX "command_list_"
 #define LOG_FILE_PREFIX "log_"
 #define SLOG_FILE_PREFIX "stable_log_"
+#define CLOG_FILE_PREFIX "create_log_"
 #define RESOURCE_FILE_PREFIX "db"
 #define FILENAME_LENGTH 100
 #define COMMAND_LENGTH 1000
@@ -31,6 +32,7 @@
 #define DELIMITER ":"
 #define DELIMITER_SEC ";"
 #define DELIMITER_TER "|"
+#define DELIMITER_QUAT "~"
 #define DELIMITER_CMD "-"
 #define DELIMITER_ARGS "/"  //used only for command list (input file)
 
@@ -50,7 +52,7 @@
 #define INFINITY 999999999
 
 #define GET_NEXT_CMD_ID command_counter*MAX_CLIENTS+my_pid 
-#define MYSERVER(my_pid) 0
+#define MYSERVER(my_pid) my_pid
 struct COMM_DATA
 {
 
@@ -77,7 +79,8 @@ enum LOG_CMD
 {
 	LOG_ADD=0,
 	LOG_INSERT=1,
-	LOG_FETCH=2
+	LOG_FETCH=2,
+	LOG_DELETE=3
 };
 struct SERVER_ID {
 	int level;
@@ -92,7 +95,7 @@ struct VERSION_VECTOR {
 };
 struct ENTROPY_INPUT{
 	struct COMM_DATA *server_comm;
-	int parent_id;
+	int *sender_list;
 	int my_pid;
 };
 #endif
