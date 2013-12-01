@@ -47,12 +47,15 @@ Authors:
 			strcat(log_str,DELIMITER);	\
 			for(j=0;j<my_version_vector.server_count;j++)	\
 			{	\
-				PREPARE_IDSTR(my_version_vector.servers[j],idstring,DELIMITER_QUAT);	\
-				strcat(log_str,idstring);	\
-				strcat(log_str,DELIMITER_TER);	\
-				sprintf(log_str,"%s%d",log_str,my_version_vector.recent_timestamp[j]);	\
-				strcat(log_str,DELIMITER_TER);	\
-				strcat(log_str,DELIMITER_SEC);	\
+				if(my_version_vector.servers[j].level != -1)	\
+				{	\
+					PREPARE_IDSTR(my_version_vector.servers[j],idstring,DELIMITER_QUAT);	\
+					strcat(log_str,idstring);	\
+					strcat(log_str,DELIMITER_TER);	\
+					sprintf(log_str,"%s%d",log_str,my_version_vector.recent_timestamp[j]);	\
+					strcat(log_str,DELIMITER_TER);	\
+					strcat(log_str,DELIMITER_SEC);	\
+				}	\
 			}	
 
 #define EXTRACT_SERVERID(STR,sid,DL)	\
@@ -415,6 +418,48 @@ int clog_command(enum LOG_CMD cmd,int my_pid,char *record)
 				
 return 0;
 }
+int rlog_command(enum LOG_CMD cmd,int my_pid,char *record)
+{
+	FILE *fp,*fptemp;
+	char filename[FILENAME_LENGTH];
+	char tempname[FILENAME_LENGTH];
+	int i=0;
+	size_t len;
+	char *line=NULL,*data;
+	ssize_t read;
+	bool fail=false;
+
+	
+	strcpy(filename,RLOG_FILE_PREFIX);
+	sprintf(filename,"%s%d",filename,my_pid);
+	strcat(filename,".log");
+
+	strcpy(tempname,"temp");
+	sprintf(tempname,"%s%d",tempname,my_pid);
+	strcat(tempname,".log");
+
+	fp = fopen(filename,"a+");
+	if(fp == NULL)
+	{
+		printf("file could not be accessed\n");
+		return -1;
+	}	
+	switch(cmd)
+	{
+
+		case LOG_ADD: 
+				//log add entry
+				fprintf(fp,"%s\n",record);
+				fclose(fp);
+				break;
+		default:
+				break;
+
+	}
+				
+				
+return 0;
+}
 int do_command(int my_pid,int cmd_type,char* cmd_data)
 {
 	FILE *fp,*fptemp;
@@ -746,11 +791,11 @@ bool send_message(int talker_fd,struct sockaddr dest_addr, socklen_t dest_addr_l
 	}
 	
 }
-bool process_logs(struct VERSION_VECTOR recv_vv, struct VERSION_VECTOR my_vv, int recv_pid,int my_pid)
+bool process_logs(struct VERSION_VECTOR recv_vv, struct VERSION_VECTOR my_vv, int recv_pid,int my_pid,bool retire)
 {
 
-	FILE *fp_log,*fp_slog;
-	char log_fname[FILENAME_LENGTH],slog_fname[FILENAME_LENGTH];
+	FILE *fp_log,*fp_slog,*fp_rlog;
+	char log_fname[FILENAME_LENGTH],slog_fname[FILENAME_LENGTH],rlog_fname[FILENAME_LENGTH];
 	int i=0;
 	size_t len;
 	char *line=NULL,*data;
@@ -774,7 +819,11 @@ bool process_logs(struct VERSION_VECTOR recv_vv, struct VERSION_VECTOR my_vv, in
 
 	strcpy(slog_fname,SLOG_FILE_PREFIX);
 	sprintf(slog_fname,"%s%d",slog_fname,my_pid);
-	strcat(slog_fname,".log");	
+	strcat(slog_fname,".log");
+
+	strcpy(rlog_fname,RLOG_FILE_PREFIX);
+	sprintf(rlog_fname,"%s%d",rlog_fname,my_pid);
+	strcat(rlog_fname,".log");
 	
 	fp_log = fopen(log_fname,"a+");
 	if(fp_log == NULL)
@@ -787,6 +836,12 @@ bool process_logs(struct VERSION_VECTOR recv_vv, struct VERSION_VECTOR my_vv, in
 	if(fp_slog == NULL)
 	{
 		printf("slog file could not be accessed\n");
+		return -1;
+	}		
+	fp_rlog = fopen(rlog_fname,"a+");
+	if(fp_rlog == NULL)
+	{
+		printf("rlog file could not be accessed\n");
 		return -1;
 	}		
 	
@@ -939,6 +994,28 @@ bool process_logs(struct VERSION_VECTOR recv_vv, struct VERSION_VECTOR my_vv, in
 
 
 	}
+//check retire and process retire log
+	if(retire)
+	{
+		if(( read = getline(&line,&len,fp_rlog)) != -1)
+		{
+			//send retire message
+			//RETIRED:<SENDER_ID>:<RETIRE_LOG>:
+			strcpy(send_buff,"RETIRED");
+			strcat(send_buff,DELIMITER);
+			sprintf(send_buff,"%s%d",send_buff,my_pid);
+			strcat(send_buff,DELIMITER);
+			strcat(send_buff,line); //check line contents and change
+			//strcat(send_buff,DELIMITER);
+			printf("Server %d: Sending RETIRE LOG to server %d \n",my_pid,recv_pid);
+			send_message(TALKER,server_addr[recv_pid],server_addr_len[recv_pid],send_buff);
+		}
+		else
+		{
+			printf("error: retire log entry missing!\n");
+		}
+
+	}
 }
 
 int main(int argc, char **argv)
@@ -948,6 +1025,8 @@ int main(int argc, char **argv)
 	struct SERVER_ID my_serverid;
 	char my_id_str[BUFSIZE/2];
 	int primary_mode = 0;
+	int retire_command=-1;
+	bool retire = false;
 
 //comm common
 	struct sockaddr_storage temp_paddr;
@@ -994,14 +1073,15 @@ int main(int argc, char **argv)
 	int tret = 0;
 	int ent_list[MAX_SERVERS];
 //check runtime arguments
-	if(argc!=4)
+	if(argc!=5)
 	{
-		printf("Usage: ./server <server_id> <parent_id> <primary_mode\n");
+		printf("Usage: ./server <server_id> <parent_id> <primary_mode> <retire_command>\n");
 		return -1;
 	}
 	my_pid=atoi(argv[1]);
 	parent_id=atoi(argv[2]);
-	primary_mode=atoi(argv[3]);
+	primary_mode=atoi(argv[3]); // 0 default
+	retire_command=atoi(argv[4]); //-1 default
 
 	//hostname configuration
 	gethostname(hostname, sizeof(hostname));
@@ -1264,9 +1344,21 @@ else
 
 				//update my entry in version vector
 				my_version_vector.recent_timestamp[0] = my_current_time;
+				//increment command counter
+				command_counter++;
 
-			
-
+				if(command_counter == retire_command)
+				{
+					retire = true;
+					//<current_time>:<SERVER_ID>:
+					sprintf(log_record,"%d",my_current_time);
+					strcat(log_record,DELIMITER);
+					strcat(log_record,my_id_str);
+					strcat(log_record,DELIMITER);
+					//write retire log
+					rlog_command(LOG_ADD,my_pid,log_record);
+				}
+				
 			}
 			else if(strcmp(data,"ENTROPY") == 0)
 			{
@@ -1314,7 +1406,7 @@ else
 
 					printf("new server - no version vector entries found!\n");
 				}				
-				if(process_logs(recv_vv,my_version_vector,recv_pid,my_pid)) 
+				if(process_logs(recv_vv,my_version_vector,recv_pid,my_pid,retire)) 
 				{
 
 					printf("anti entropy messages sent!\n");
@@ -1351,6 +1443,8 @@ else
 
 				}
 				
+				if(retire)
+					exit(-1);
 
 				
 				
@@ -1493,7 +1587,8 @@ else
 					ts = atoi(data);
 				idstr = strtok(NULL,DELIMITER);
 				cmd_str = strtok(NULL,DELIMITER);
-		
+				EXTRACT_SERVERID(idstr,serv,DELIMITER_SEC);
+
 				data=strtok_r(log_record,DELIMITER,&tok);
 				data=strtok_r(NULL,DELIMITER,&tok);
 				slog_command(LOG_ADD,my_pid,tok);
@@ -1535,6 +1630,35 @@ else
 				}				
 				
 
+			}
+			else if(strcmp(data,"RETIRED") == 0)
+			{
+				data = strtok(NULL,DELIMITER);
+				if(data)
+					ts = atoi(data);
+
+				idstr = strtok(NULL,DELIMITER);
+				EXTRACT_SERVERID(idstr,serv,DELIMITER_SEC);
+				//updating timestamp
+				for(i=0;i<my_version_vector.server_count;i++)
+				{
+					if(equal_serverID(my_version_vector.servers[i],serv))
+					{
+						//erase retired server record
+						printf("removed primary from vv!\n");
+						my_version_vector.servers[i].level = -1;
+						my_version_vector.recent_timestamp[i] = -1;
+						break;
+					}
+				
+				}
+				//go to primary mode
+				primary_mode = 1;
+				//remove from ent_list
+				ent_list[recv_pid] = -1;
+				//move all tentative writes to stable writes
+
+				//continue normal functionality
 			}
 		} 
 

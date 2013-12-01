@@ -24,6 +24,7 @@
 #define LOG_FILE_PREFIX "log_"
 #define SLOG_FILE_PREFIX "stable_log_"
 #define CLOG_FILE_PREFIX "create_log_"
+#define RLOG_FILE_PREFIX "retire_log_"
 #define RESOURCE_FILE_PREFIX "db"
 #define FILENAME_LENGTH 100
 #define COMMAND_LENGTH 1000
