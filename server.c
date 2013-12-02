@@ -1304,7 +1304,7 @@ else
 
 				//update timestamp for received command
 				command_list[command_counter].timestamp = my_current_time;
-				my_current_time++;
+				//my_current_time++;
 
 				//log the write request
 				if(primary_mode)
@@ -1358,6 +1358,7 @@ else
 					//write retire log
 					rlog_command(LOG_ADD,my_pid,log_record);
 				}
+                                my_current_time++; //update current time
 				
 			}
 			else if(strcmp(data,"ENTROPY") == 0)
@@ -1490,6 +1491,8 @@ else
 				{
 					log_command(LOG_INSERT,my_pid,rec);
 				}
+                                //update my time
+                                my_current_time = max(ts+1,my_current_time);
 				//update version vector
 				
 				//updating timestamp
@@ -1540,6 +1543,9 @@ else
 				data=strtok_r(NULL,DELIMITER,&tok);
 				strcpy(rec,tok);
 				slog_command(LOG_ADD,my_pid,rec);
+                                
+                                //update my time
+                                my_current_time = max(ts+1,my_current_time);
 
 				//update version vector
 				//printf("CSN RECEIVED -----------> %d\n",recv_csn);
@@ -1597,6 +1603,8 @@ else
 				data=strtok_r(NULL,DELIMITER,&tok);
 				log_command(LOG_DELETE,my_pid,tok);
 
+                                //update my time
+                                my_current_time = max(ts+1,my_current_time);
 				//update version vector
 				my_version_vector.csn++; //stable write so increment CSN
 				
@@ -1639,6 +1647,8 @@ else
 
 				idstr = strtok(NULL,DELIMITER);
 				EXTRACT_SERVERID(idstr,serv,DELIMITER_SEC);
+                                //update my time
+                                my_current_time = max(ts+1,my_current_time);
 				//updating timestamp
 				for(i=0;i<my_version_vector.server_count;i++)
 				{

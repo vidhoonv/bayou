@@ -54,6 +54,12 @@
 
 #define GET_NEXT_CMD_ID command_counter*MAX_CLIENTS+my_pid 
 #define MYSERVER(my_pid) my_pid
+
+ #define max(a,b) \
+   ({ __typeof__ (a) _a = (a); \
+       __typeof__ (b) _b = (b); \
+     _a > _b ? _a : _b; })
+
 struct COMM_DATA
 {
 
