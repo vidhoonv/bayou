@@ -23,9 +23,9 @@ Authors:
 #define PREPARE_IDSTR(serverid,STR,DL)	\
 			i = 0;	\
 			strcpy(STR,"");	\
-			while(i < serverid.level)	\
+			while(i <= serverid.level)	\
 			{	\
-				sprintf(STR,"%s%d",STR,serverid.id[i]);	\
+                               	sprintf(STR,"%s%d",STR,serverid.id[i]);	\
 				strcat(STR,DL);	\
 				i++;	\
 			}	
@@ -45,12 +45,13 @@ Authors:
 #define PREPARE_VVSTR()	\
 			sprintf(log_str,"%d",my_version_vector.csn);	\
 			strcat(log_str,DELIMITER);	\
+                        strcpy(idstring,"");    \
 			for(j=0;j<my_version_vector.server_count;j++)	\
 			{	\
 				if(my_version_vector.servers[j].level != -1)	\
 				{	\
 					PREPARE_IDSTR(my_version_vector.servers[j],idstring,DELIMITER_QUAT);	\
-					strcat(log_str,idstring);	\
+                                        strcat(log_str,idstring);	\
 					strcat(log_str,DELIMITER_TER);	\
 					sprintf(log_str,"%s%d",log_str,my_version_vector.recent_timestamp[j]);	\
 					strcat(log_str,DELIMITER_TER);	\
@@ -68,6 +69,7 @@ Authors:
 				sid.level++;	\
 				id_data = strtok_r(NULL,DL,&tok2);	\
 			}	\
+                        sid.level--;
 			
 #define EXTRACT_COMMAND_DATA(STR,ID,TYPE,DATA)     \
                         data = strtok(STR,DELIMITER_SEC);       \
@@ -99,7 +101,7 @@ bool equal_serverID(struct SERVER_ID s1,struct SERVER_ID s2)
 	
 	if(s1.level == s2.level)
 	{
-		for(i=0;i<s1.level;i++)
+		for(i=0;i<=s1.level;i++)
 		{
 
 			if(s1.id[i] == s2.id[i])
@@ -117,7 +119,7 @@ bool copy_serverID(struct SERVER_ID *dest,struct SERVER_ID src)
 	int i=0;
 
 	dest->level = src.level;
-	for(i=0;i<src.level;i++)
+	for(i=0;i<=src.level;i++)
 	{	
 		dest->id[i] = src.id[i];	
 
@@ -132,7 +134,7 @@ bool compare_serverID(struct SERVER_ID s1,struct SERVER_ID s2)
 		return true;
 	if(s1.level == s2.level)
 	{
-		for(i=s1.level-1;i>=0;i--)
+		for(i=s1.level;i>=0;i--)
 		{	
 			if(s1.id[i] > s2.id[i])
 				return false;
@@ -900,7 +902,7 @@ void init_anti_entropy(union sigval args)
 	
 	PREPARE_VVSTR();
 
-	printf("timer expired!!!\n");
+	printf("\n\ntimer expired %s!!!\n",log_str);
 	//send ENTROPY
 	strcpy(send_buff,"ENTROPY");
 	strcat(send_buff,DELIMITER);
@@ -1230,6 +1232,7 @@ int main(int argc, char **argv)
 	struct SERVER_ID serv;
 	int ts=0,recv_csn = -1;
 	char rec[BUFSIZE];
+        char str_check[BUFSIZE];
 //time - logical clock
 	int my_current_time = 0;
 
@@ -1310,21 +1313,29 @@ int main(int argc, char **argv)
 		recv_vv.servers[i].level = -1;
 		recv_vv.recent_timestamp[i] = -1;
 	}
-		my_version_vector.server_count = 1;
+		my_version_vector.server_count = 0;
+                
+                for(i=0;i<MAX_LEVELS;i++)
+                {
+                    my_serverid.id[i] = -1;
+                }
+                my_serverid.level = -1;
 		
 //DO CREATE WRITE and get INITIAL TIMESTAMP
 if(parent_id == my_pid)
 {
 	//I am the master server
-	my_serverid.level = 1;
+	my_serverid.level = 0;
 	my_serverid.id[my_serverid.level] = 0;
 
 	//INIT current time
 	my_current_time = my_serverid.id[my_serverid.level];
 
 	PREPARE_IDSTR(my_serverid,my_id_str,DELIMITER_SEC);
+        printf("my id str %s\n",my_id_str);
 
 	copy_serverID(&(my_version_vector.servers[0]),my_serverid);
+        my_version_vector.server_count++;
 
 	//start entropy timer
 	tret = timer_settime(entropy_timer,0,&entropy_timer_val,&old_val);
@@ -1405,6 +1416,8 @@ else
 				strcat(log_record,DELIMITER);
 
 				clog_command(LOG_ADD,my_pid,log_record);
+                                //update my entry in version vector
+				my_version_vector.recent_timestamp[0] = my_current_time;
 				//increment time
 				my_current_time++;
 
@@ -1428,6 +1441,7 @@ else
 					perror("sendto ");
 				        close(TALKER);
 				}			
+                               
 
 			}
 			else if(strcmp(data,"CREATED") == 0)
@@ -1446,6 +1460,7 @@ else
 			
 				//update version vector with my server id
 				copy_serverID(&(my_version_vector.servers[0]),my_serverid);
+                                my_version_vector.server_count++;
 				//start entropy timer
 				tret = timer_settime(entropy_timer,0,&entropy_timer_val,&old_val);
 
@@ -1521,18 +1536,21 @@ else
 
 				if(command_counter == retire_command)
 				{
-					retire = true;
+                                    	retire = true;
+                                        
 					//<current_time>:<SERVER_ID>:<primary_mode>
 					sprintf(log_record,"%d",my_current_time);
 					strcat(log_record,DELIMITER);
 					strcat(log_record,my_id_str);
 					strcat(log_record,DELIMITER);
-                                        sprintf(log_record,"%d",primary_mode);
+                                        sprintf(log_record,"%s%d",log_record,primary_mode);
                                         strcat(log_record,DELIMITER);
 					//write retire log
+                                        printf("\n\n\n\n@@@@@@@@@@ writing retire log %s\n\n\n\n",log_record);
 					rlog_command(LOG_ADD,my_pid,log_record);
 				}
                                 my_current_time++; //update current time
+                       
 				
 			}
 			else if(strcmp(data,"ENTROPY") == 0)
@@ -1564,7 +1582,7 @@ else
 					//<server_id,timestamp>
 
 					idstr = strtok_r(vv_data,DELIMITER_TER,&tok1);
-
+                                       //printf("@@@@@@@@@@@@@@@@@@ id string %s\n",idstr);
 					EXTRACT_SERVERID(idstr,recv_vv.servers[k],DELIMITER_QUAT);
 
 					recv_vv.recent_timestamp[k] = atoi(strtok_r(NULL,DELIMITER_TER,&tok1));
@@ -1597,12 +1615,12 @@ else
                                         serv.level = serv.level -1;
                                         
                                         //serv contains parent id
-                                        
+                                          printf("\n!!!!!doubting retirement\n");
                                         for(j=0;j<recv_vv.server_count;j++)
-                                        {
+                                        {     
                                                 if(equal_serverID(recv_vv.servers[j],serv))
-                                                {
-                                                       //check time stamp of parent against creation time stamp of parent
+                                                {   
+                                                       //check time stamp of parent against creation time stamp of server
                                                     if(recv_vv.recent_timestamp[j] >= recv_vv.servers[i].id[recv_vv.servers[i].level])
                                                     {
                                                         //recv_vv.servers[i] has retired
@@ -1610,15 +1628,24 @@ else
                                                          {
                                                                 if(equal_serverID(my_version_vector.servers[k],recv_vv.servers[i]))
                                                                 {
-                                                                        my_version_vector.recent_timestamp[k] = -1;
-                                                                        my_version_vector.servers[k].level = -1;
-                                                                        printf("!!!detected retirement\n");
+                                                                    if(my_version_vector.recent_timestamp[k] != -1)
+                                                                    {
+                                                                         my_version_vector.recent_timestamp[k] = -1;
+                                                                        //my_version_vector.servers[k].level = -1;
+                                                                        printf("\n!!!!!detected retirement\n");
+                                                                    }
+                                                                    else
+                                                                    {
+                                                                        //printf("\n\n\n!!!!!already updated retirement\n");
+                                                                    }
+                                                                       
                                                                 }
                                                          }       
                                                     }
                                                     else
                                                     {
                                                         //recv_vv.servers[i] has not retired
+                                                         printf("\n\n\n!!!!!it is not retirement %d %d \n",recv_vv.recent_timestamp[j],recv_vv.servers[i].id[recv_vv.servers[i].level]);
                                                     }
                                                     break;
                                                 }
@@ -1630,6 +1657,7 @@ else
                                     }    
                                 }
                                 
+                                                    
 				if(process_logs(recv_vv,my_version_vector,recv_pid,my_pid,retire)) 
 				{
 
@@ -1662,9 +1690,9 @@ else
 				idstr = strtok(NULL,DELIMITER);
 				cmd_str = strtok(NULL,DELIMITER);
 
-			
+                                
 				EXTRACT_SERVERID(idstr,serv,DELIMITER_SEC);					
-		
+                                               
 				// do log insert for the received write log in tentative log
 				data=strtok_r(log_record,DELIMITER,&tok);
 				data=strtok_r(NULL,DELIMITER,&tok);
@@ -1711,6 +1739,9 @@ else
 					if(copy_serverID(&(my_version_vector.servers[my_version_vector.server_count]),serv))
 					{
 						printf("serv id copied to vv!");
+                                                PREPARE_IDSTR(my_version_vector.servers[my_version_vector.server_count],str_check,DELIMITER_SEC)
+                                                //EXTRACT_SERVERID(str_check,my_version_vector.servers[my_version_vector.server_count],DELIMITER_SEC);
+                                                
 					}
 					else
 					{
@@ -1841,12 +1872,7 @@ else
 			else if(strcmp(data,"RETIRED") == 0)
 			{
                                 recv_retire = true;
-                                if(recv_pid > my_pid)
-                                    continue;
-                                else
-                                {    
-                                    retire=false;
-                                }    
+                              
 				data = strtok(NULL,DELIMITER);
 				if(data)
 					ts = atoi(data);
@@ -1865,12 +1891,12 @@ else
 					if(equal_serverID(my_version_vector.servers[i],serv))
 					{
 						//erase retired server record
-						printf("removed primary from vv!\n");
-						my_version_vector.servers[i].level = -1;
+						printf("removed server from vv!\n");
+						//my_version_vector.servers[i].level = -1;
 						my_version_vector.recent_timestamp[i] = -1;
 						break;
 					}
-				
+				printf("did not remove server from vv!\n");
 				}
 				//check if the retired node is primary and update primary mode accordingly
                                 if(mode == 1)
