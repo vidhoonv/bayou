@@ -16,7 +16,7 @@ Authors:
 
 #define PERFORM_COMMAND(command) \
 			printf("\nIN PERFORM COMMAND %d\n",command.command_id); \
-			rc = do_command(my_pid,command.command_type,command.command_data);	\
+			rc = do_command(0,my_pid,command.command_type,command.command_data);	\
 			printf("\n>>>>>>>>Performed command %d res:%d\n",command.command_id,rc); \
 			respond(my_pid,TALKER,command.command_id,client_addr[command.command_id%MAX_CLIENTS],client_addr_len[command.command_id%MAX_CLIENTS],rc);	
 
@@ -69,7 +69,17 @@ Authors:
 				id_data = strtok_r(NULL,DL,&tok2);	\
 			}	\
 			
-			
+#define EXTRACT_COMMAND_DATA(STR,ID,TYPE,DATA)     \
+                        data = strtok(STR,DELIMITER_SEC);       \
+                        if(data)        \
+                        ID = atoi(data);        \
+                        data = strtok(NULL,DELIMITER_SEC);      \
+                        if(data)        \
+                                TYPE = atoi(data);      \
+                        data = strtok(NULL,DELIMITER_SEC);      \
+                        if(data)        \
+                                    strcpy(DATA,data);  
+
 			
 //globals
 char log_str[BUFSIZE];
@@ -230,12 +240,12 @@ int log_command(enum LOG_CMD cmd,int my_pid,char *record)
 	ssize_t read;
 	bool fail=false;
 	time_t curr_time;
-	
+	int k=0,lines_to_skip=0;
 	strcpy(filename,LOG_FILE_PREFIX);
 	sprintf(filename,"%s%d",filename,my_pid);
 	strcat(filename,".log");
 
-	strcpy(tempname,"temp");
+	strcpy(tempname,"temp-log");
 	sprintf(tempname,"%s%d",tempname,my_pid);
 	strcat(tempname,".log");
 
@@ -276,7 +286,25 @@ int log_command(enum LOG_CMD cmd,int my_pid,char *record)
 					printf("new resource file ready\n");
 				break;
 		case LOG_FETCH:
-				
+                		lines_to_skip = atoi(record); //record used as in parameter
+                                k=0; fail = true;
+                                while(( read = getline(&line,&len,fp)) != -1)
+				{                                  
+                                    if(k<lines_to_skip)
+                                    {
+                                        k++;
+                                        continue;
+                                    }
+					if(line[strlen(line)-1] == '\n')
+						line[strlen(line)-1]='\0';
+					
+					sprintf(record,"%s",line);
+                                        fail = false;
+                                        break;
+				}
+                                fclose(fp);
+                                if(fail)
+                                    return -1;
 				break;
 		case LOG_DELETE:
 				fail=true;
@@ -335,13 +363,13 @@ int slog_command(enum LOG_CMD cmd,int my_pid,char *record)
 	char *line=NULL,*data;
 	ssize_t read;
 	bool fail=false;
-
+        int lines_to_skip=0,k=0;
 	
 	strcpy(filename,SLOG_FILE_PREFIX);
 	sprintf(filename,"%s%d",filename,my_pid);
 	strcat(filename,".log");
 
-	strcpy(tempname,"temp");
+	strcpy(tempname,"temp-slog");
 	sprintf(tempname,"%s%d",tempname,my_pid);
 	strcat(tempname,".log");
 
@@ -366,7 +394,27 @@ int slog_command(enum LOG_CMD cmd,int my_pid,char *record)
 			
 				break;
 		case LOG_FETCH:
-				
+				lines_to_skip = atoi(record); //record used as in parameter
+                                fail=true;
+                                k=0;
+                                while(( read = getline(&line,&len,fp)) != -1)
+				{         
+                                    //printf("trying to fetch line %d\n",record);
+                                    if(k<lines_to_skip)
+                                    {
+                                        k++;
+                                        continue;
+                                    }
+					if(line[strlen(line)-1] == '\n')
+						line[strlen(line)-1]='\0';
+					
+					sprintf(record,"%s",line);
+                                        fail=false;
+                                        break;
+				}
+                                fclose(fp);
+                                if(fail)
+                                    return -1;
 				break;
 		default:
 				break;
@@ -392,7 +440,7 @@ int clog_command(enum LOG_CMD cmd,int my_pid,char *record)
 	sprintf(filename,"%s%d",filename,my_pid);
 	strcat(filename,".log");
 
-	strcpy(tempname,"temp");
+	strcpy(tempname,"temp-clog");
 	sprintf(tempname,"%s%d",tempname,my_pid);
 	strcat(tempname,".log");
 
@@ -434,7 +482,7 @@ int rlog_command(enum LOG_CMD cmd,int my_pid,char *record)
 	sprintf(filename,"%s%d",filename,my_pid);
 	strcat(filename,".log");
 
-	strcpy(tempname,"temp");
+	strcpy(tempname,"temp-rlog");
 	sprintf(tempname,"%s%d",tempname,my_pid);
 	strcat(tempname,".log");
 
@@ -460,7 +508,7 @@ int rlog_command(enum LOG_CMD cmd,int my_pid,char *record)
 				
 return 0;
 }
-int do_command(int my_pid,int cmd_type,char* cmd_data)
+int do_command(int mode,int my_pid,int cmd_type,char* cmd_data)
 {
 	FILE *fp,*fptemp;
 	char filename[FILENAME_LENGTH];
@@ -475,22 +523,24 @@ int do_command(int my_pid,int cmd_type,char* cmd_data)
 	char record[2*MAX_INPUT_LENGTH];
 	int  op_arg;
 	bool fail=false;
-	
-	strcpy(filename,RESOURCE_FILE_PREFIX);
-	sprintf(filename,"%s%d",filename,my_pid);
-	strcat(filename,".res");
+         strcpy(filename,RESOURCE_FILE_PREFIX);
+         sprintf(filename,"%s%d",filename,my_pid);
+         strcat(filename,".res");
 
-	strcpy(tempname,"temp");
-	sprintf(tempname,"%s%d",tempname,my_pid);
-	strcat(tempname,".res");	
+        strcpy(tempname,"temp-res");
+        sprintf(tempname,"%s%d",tempname,my_pid);
+        strcat(tempname,".res");	
+	         
 	
-	fp = fopen(filename,"a+");
-	if(fp == NULL)
-	{
-		printf("file could not be accessed\n");
-		return -1;
-	}	
-	printf("while doing command: cmd_type:%d cmd_data:%s\n",cmd_type,cmd_data);
+        	fp = fopen(filename,"a+");
+                if(fp == NULL)
+                {
+                        printf("file could not be accessed\n");
+                        return -1;
+                }
+      
+      
+	//printf("while doing command: cmd_type:%d cmd_data:%s\n",cmd_type,cmd_data);
 	
 	data = strtok(cmd_data,DELIMITER_CMD);
 	if(!data)
@@ -506,7 +556,7 @@ int do_command(int my_pid,int cmd_type,char* cmd_data)
 	{
 		case COMMAND_ADD:
 					//received add command 
-					printf("add received\n");
+					//printf("add received\n");
 										
 					//adding with new line
 					fprintf(fp,"%s-%s\n",song_name,song_url);
@@ -515,7 +565,7 @@ int do_command(int my_pid,int cmd_type,char* cmd_data)
 				break;
 		case COMMAND_DELETE:
 					//received delete command 
-					printf("delete received\n");
+					//printf("delete received\n");
 
 					fail=true;
 					fptemp = fopen(tempname,"a+");
@@ -564,7 +614,7 @@ int do_command(int my_pid,int cmd_type,char* cmd_data)
 					
 		case COMMAND_EDIT:
 					//received edit command 
-					printf("edit received\n");
+					//printf("edit received\n");
 
 					//fetch remaining arguments for command
 					data = strtok(NULL,DELIMITER_CMD);
@@ -627,6 +677,108 @@ int do_command(int my_pid,int cmd_type,char* cmd_data)
 	}	
 return 0;
 
+}
+bool update_resource(int my_pid, int primary_mode)
+{
+        char filename[BUFSIZE],tempname[BUFSIZE]; 
+	int i=0,recv_csn,ts;
+	size_t len;
+	char *line=NULL,*data;
+	ssize_t read;
+	bool fail=false;
+        int num_lines_skipped =0;
+        char record[BUFSIZE];
+        char *idstr,*cmd_str;
+        int cmd_type;
+        char cmd_data[BUFSIZE];
+        char send_buff[BUFSIZE];
+        int command_id = -1;
+        int rc=0;
+        
+         strcpy(filename,RESOURCE_FILE_PREFIX);
+         sprintf(filename,"%s%d",filename,my_pid);
+         strcat(filename,".res");
+	
+         unlink(filename); //delete old res file
+        // printf("!!!!!!fn:%s tn:%s\n",filename,tempname);
+        //read stable log and construct new resource file
+     
+        while(1)
+        {
+                sprintf(record,"%d",num_lines_skipped);
+                if(slog_command(LOG_FETCH,my_pid,record) == -1)
+                {
+                   //end of stable log file
+                   break;
+                }
+               // printf("record %s\n",record);
+               // break;
+                num_lines_skipped++; //number of lines to skip during next fetch
+                data = strtok(record,DELIMITER);
+		if(data)
+                        recv_csn = atoi(data);
+		data = strtok(NULL,DELIMITER);
+		if(data)
+                        ts = atoi(data);
+		idstr = strtok(NULL,DELIMITER);
+		cmd_str = strtok(NULL,DELIMITER);
+                
+                EXTRACT_COMMAND_DATA(cmd_str,command_id,cmd_type,cmd_data);
+                
+                if(do_command(1,my_pid,cmd_type,cmd_data) == -1)
+                {
+                   printf("command execution  from stable log failed\n");
+                   //notify client about stable failure
+                }
+                else
+                {
+                    printf("command executed successfully from stable log\n");
+                    //notify client about stable success
+                }    
+               //fetch next command and execute  
+              // break;
+		
+        }
+        if(!primary_mode)
+        {    
+        //move to tentative logs and process
+        //now only those tentative logs that are coherent with the latest state of resource would be applied
+        //all tentative commands that fail to apply should be notified to client as failed commands
+                num_lines_skipped = 0;
+                while(1)
+                {
+                        sprintf(record,"%d",num_lines_skipped);
+                        if(log_command(LOG_FETCH,my_pid,record) == -1)
+                        {
+                                //end of stable log file
+                                break;
+                        }
+               // break;
+                        num_lines_skipped++; //number of lines to skip during next fetch
+                        data = strtok(NULL,DELIMITER);
+                        if(data)
+                                ts = atoi(data);
+                        idstr = strtok(NULL,DELIMITER);
+                        cmd_str = strtok(NULL,DELIMITER);
+                
+                        EXTRACT_COMMAND_DATA(cmd_str,command_id,cmd_type,cmd_data);
+                        rc = do_command(1,my_pid,cmd_type,cmd_data);       
+                        if(rc == -1)
+                        {
+                                //handle error - send notification to client
+                                printf("command execution  from tentative log failed\n");    
+                        }
+                        else
+                        {
+                              printf("command execution  from tentative log successful\n");                              
+                        }
+                        //fetch next command and execute  
+		
+                }
+        }
+
+
+        return 0;
 }
 void respond(int my_pid,int talker_fd,int command_id,struct sockaddr dest_addr, socklen_t dest_addr_len,int result)
 {
@@ -809,7 +961,7 @@ bool process_logs(struct VERSION_VECTOR recv_vv, struct VERSION_VECTOR my_vv, in
 	struct SERVER_ID serv;
 	int serv_ts = -1;
 	int line_count = 0;
-
+        bool msg_sent = false;
 	char send_buff[BUFSIZE];
 	char lncopy[BUFSIZE];	
 
@@ -906,6 +1058,7 @@ bool process_logs(struct VERSION_VECTOR recv_vv, struct VERSION_VECTOR my_vv, in
 				//strcat(send_buff,DELIMITER);
 				printf("Server %d: Sending commit notification to server %d \n",my_pid,recv_pid);
 				send_message(TALKER,server_addr[recv_pid],server_addr_len[recv_pid],send_buff);
+                                msg_sent=true;
 			}
 			else
 			{
@@ -927,6 +1080,7 @@ bool process_logs(struct VERSION_VECTOR recv_vv, struct VERSION_VECTOR my_vv, in
 				//strcat(send_buff,DELIMITER);
 				printf("Server %d: Sending WRITE LOG(STABLE) to server %d \n",my_pid,recv_pid);
 				send_message(TALKER,server_addr[recv_pid],server_addr_len[recv_pid],send_buff);
+                                msg_sent=true;
 			}
 			//reset value
 			serv_ts = -1;
@@ -988,6 +1142,7 @@ bool process_logs(struct VERSION_VECTOR recv_vv, struct VERSION_VECTOR my_vv, in
 				//strcat(send_buff,DELIMITER);
 				printf("Server %d: Sending WRITE LOG(TENTATIVE) to server %d \n",my_pid,recv_pid);
 				send_message(TALKER,server_addr[recv_pid],server_addr_len[recv_pid],send_buff);
+                                msg_sent=true;
 			}
 			//reset values
 			serv_ts = -1;
@@ -1016,6 +1171,18 @@ bool process_logs(struct VERSION_VECTOR recv_vv, struct VERSION_VECTOR my_vv, in
 		}
 
 	}
+
+//send entropy complete notification
+        //ENTROPY_COMPLETE:<SENDER_ID>:
+        if(msg_sent)
+        {
+                strcpy(send_buff,"ENTROPY_COMPLETE");
+        	strcat(send_buff,DELIMITER);
+                sprintf(send_buff,"%s%d",send_buff,my_pid);
+                strcat(send_buff,DELIMITER);
+                printf("Server %d: Sending ENTROPY_COMPLETE to server %d \n",my_pid,recv_pid);
+                send_message(TALKER,server_addr[recv_pid],server_addr_len[recv_pid],send_buff);      
+        }
 }
 
 int main(int argc, char **argv)
@@ -1127,7 +1294,7 @@ int main(int argc, char **argv)
 //init timer args
 	entropy_timer_val.it_value.tv_sec = 10;
 	entropy_timer_val.it_value.tv_nsec = 0;
-	entropy_timer_val.it_interval.tv_sec = 15;
+	entropy_timer_val.it_interval.tv_sec = 10;
 	entropy_timer_val.it_interval.tv_nsec = 0;
 
 	if(!entropy_timer)
@@ -1518,7 +1685,7 @@ else
 						printf("error: serv id copy to vv failed!");
 
 					}
-					printf("!!!!!!timestamp updated %d\n",ts);
+					//printf("!!!!!!timestamp updated %d\n",ts);
 					my_version_vector.recent_timestamp[my_version_vector.server_count] = ts;
 
 					my_version_vector.server_count++;
@@ -1662,16 +1829,28 @@ else
 					}
 				
 				}
-				//go to primary mode
-				primary_mode = 1;
+				//check if the retired node is primary and update primary mode accordingly
+				primary_mode = 1; //wrong
 				//remove from ent_list
 				ent_list[recv_pid] = -1;
-				//move all tentative writes to stable writes
+				//move all tentative writes to stable writes --> happens automatically on calling update_resources after entropy completion
 
 				//continue normal functionality
 			}
-		} 
-
+		        else if(strcmp(data,"ENTROPY_COMPLETE")==0)
+                        {
+                                //do entropy complete post processing here
+                                 //update resource
+                                if(update_resource(my_pid,primary_mode) == -1)
+                                {
+                                        printf("Resource update failed!\n");
+                                }
+                                else
+                                {
+                                        printf("Resource update successful!\n");
+                                }                             
+                        }
+               }
 		
 	}
 return 0;
