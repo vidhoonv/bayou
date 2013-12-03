@@ -28,6 +28,7 @@
 #define RESOURCE_FILE_PREFIX "db"
 #define FILENAME_LENGTH 100
 #define COMMAND_LENGTH 1000
+#define MAX_COMMANDS 1000
 
 
 #define DELIMITER ":"

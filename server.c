@@ -680,6 +680,55 @@ int do_command(int mode,int my_pid,int cmd_type,char* cmd_data)
 return 0;
 
 }
+void respond(int my_pid,int talker_fd,int command_id,struct sockaddr dest_addr, socklen_t dest_addr_len,int result)
+{
+
+	int ret;
+	char send_buff[BUFSIZE];
+
+	printf("\nSending response to client\n");
+	strcpy(send_buff,"RESPONSE"); 	
+	strcat(send_buff,DELIMITER);
+	sprintf(send_buff,"%s%d",send_buff,my_pid);	
+	strcat(send_buff,DELIMITER);
+	sprintf(send_buff,"%s%d",send_buff,command_id);	
+	strcat(send_buff,DELIMITER);
+
+	if(result == -1)
+	{
+		
+		strcat(send_buff,"TF");
+
+	}
+	else if(result == 0)
+	{
+		
+		strcat(send_buff,"TS");
+	}
+        else if(result == 2)
+	{
+		
+		strcat(send_buff,"SS");
+	}
+	else if(result == -2)
+	{
+		
+		strcat(send_buff,"SF");
+	}
+	strcat(send_buff,DELIMITER);
+	
+
+	ret = sendto(talker_fd, send_buff, strlen(send_buff), 0, 
+      		(struct sockaddr *)&dest_addr, dest_addr_len);
+			
+	if (ret < 0)
+     	{
+      		perror("sendto ");
+	        close(talker_fd);
+      		//return false;
+     	}
+//return true;	
+}
 bool update_resource(int my_pid, int primary_mode)
 {
         char filename[BUFSIZE],tempname[BUFSIZE]; 
@@ -731,11 +780,13 @@ bool update_resource(int my_pid, int primary_mode)
                 {
                    printf("command execution  from stable log failed\n");
                    //notify client about stable failure
+                   respond(my_pid, TALKER,command_id,client_addr[command_id%MAX_CLIENTS], client_addr_len[command_id%MAX_CLIENTS],-2);
                 }
                 else
                 {
                     printf("command executed successfully from stable log\n");
                     //notify client about stable success
+                    respond(my_pid, TALKER,command_id,client_addr[command_id%MAX_CLIENTS], client_addr_len[command_id%MAX_CLIENTS],2);
                 }    
                //fetch next command and execute  
               // break;
@@ -782,45 +833,40 @@ bool update_resource(int my_pid, int primary_mode)
 
         return 0;
 }
-void respond(int my_pid,int talker_fd,int command_id,struct sockaddr dest_addr, socklen_t dest_addr_len,int result)
+
+bool move_tentative_to_stable(int my_pid,struct VERSION_VECTOR *my_vv)
 {
-
-	int ret;
-	char send_buff[BUFSIZE];
-
-	printf("\nSending response to client\n");
-	strcpy(send_buff,"RESPONSE"); 	
-	strcat(send_buff,DELIMITER);
-	sprintf(send_buff,"%s%d",send_buff,my_pid);	
-	strcat(send_buff,DELIMITER);
-	sprintf(send_buff,"%s%d",send_buff,command_id);	
-	strcat(send_buff,DELIMITER);
-
-	if(result == -1)
-	{
-		
-		strcat(send_buff,"F");
-
-	}
-	else if(result == 0)
-	{
-		
-		strcat(send_buff,"S");
-	}
-	
-	strcat(send_buff,DELIMITER);
-	
-
-	ret = sendto(talker_fd, send_buff, strlen(send_buff), 0, 
-      		(struct sockaddr *)&dest_addr, dest_addr_len);
-			
-	if (ret < 0)
-     	{
-      		perror("sendto ");
-	        close(talker_fd);
-      		//return false;
-     	}
-//return true;	
+           int num_lines_skipped = 0;
+           char record[BUFSIZE];
+           char new_record[BUFSIZE];
+           char filename[BUFSIZE];
+           
+        strcpy(filename,LOG_FILE_PREFIX);
+	sprintf(filename,"%s%d",filename,my_pid);
+	strcat(filename,".log");
+        
+                while(1)
+                {
+                        sprintf(record,"%d",num_lines_skipped);
+                        if(log_command(LOG_FETCH,my_pid,record) == -1)
+                        {
+                                //end of log file
+                                break;
+                        }
+              
+                        num_lines_skipped++; //number of lines to skip during next fetch
+                        my_vv->csn++;
+                        sprintf(new_record,"%d",my_vv->csn);
+                        strcat(new_record,DELIMITER);
+                        strcat(new_record,record);
+                        slog_command(LOG_ADD,my_pid,new_record);
+                       
+                }
+           
+           //delete tentative log
+           unlink(filename);
+           
+           return true;
 }
 
 bool configure_server(int my_pid,struct COMM_DATA *comm_replica)
@@ -1611,8 +1657,17 @@ else
                                         //if above entity is >= than recv_vv.servers[i]'s creation timestamp
                                         // then recv_vv.servers[i] has retired
                                         copy_serverID(&serv,recv_vv.servers[i]);
-                                        serv.id[serv.level] = -1;
-                                        serv.level = serv.level -1;
+                                        if(serv.level == 0)
+                                        {
+                                            //first server - no parent
+                                            recv_vv.recent_timestamp[i] = 100000; //+ infinity
+                                        }
+                                        else
+                                        {
+                                             serv.id[serv.level] = -1;
+                                             serv.level = serv.level -1;
+                                        }
+                                       
                                         
                                         //serv contains parent id
                                           printf("\n!!!!!doubting retirement\n");
@@ -1900,10 +1955,23 @@ else
 				}
 				//check if the retired node is primary and update primary mode accordingly
                                 if(mode == 1)
-                                        primary_mode = 1; 
+                                {
+                                        primary_mode = 1;
+                                      
+                                        //move all tentative writes to stable writes --> happens automatically on calling update_resources after entropy completion
+                                        if(!move_tentative_to_stable(my_pid,&my_version_vector))
+                                        {
+                                            printf("error while moving my tentative logs to stable logs!\n");
+                                        }
+                                        else
+                                        {
+                                            printf("moved my tentative logs to stable logs!\n");
+                                        }
+                                       
+                                }
 				//remove from ent_list
 				ent_list[recv_pid] = -1;
-				//move all tentative writes to stable writes --> happens automatically on calling update_resources after entropy completion
+				
 
 				//continue normal functionality
 			}

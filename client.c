@@ -176,7 +176,12 @@ void* listener(void *arg)
 	char *data,*tok,*res;
 	int recv_cmd_id;
 	struct COMM_DATA *client_comm = (struct COMM_DATA *)arg;
-
+        int cmd_res[MAX_COMMANDS];
+        int rc = -1;
+        
+        for(i=0;i<MAX_COMMANDS;i++)
+            cmd_res[i] = -1;
+        
 	printf("listening for msgs \n");
 	while(1)
 	{
@@ -207,7 +212,7 @@ void* listener(void *arg)
             			return NULL;
         		}		
 			recv_buff[nread] = 0;
-  			//printf("received: %s\n", recv_buff);
+  			printf("received: %s\n", recv_buff);
 
 			strcpy(buff_copy,recv_buff);			
 			data = strtok_r(buff_copy,DELIMITER,&tok);
@@ -217,9 +222,11 @@ void* listener(void *arg)
 			recv_cmd_id = atoi(strtok_r(NULL,DELIMITER,&tok));
 
 			res = strtok_r(NULL,DELIMITER,&tok);
-
-			printf("recved msg from server content:%s for command %d  res:%s\n",data,recv_cmd_id,res);
-			
+                        if(cmd_res[recv_cmd_id] == -1 && strcpy(res,"SS") == 2)
+                        {
+        			printf("recved msg from server content:%s for command %d  res:%s\n",data,recv_cmd_id,res);
+                                cmd_res[recv_cmd_id] = 1;
+			}
 	
 		}
 		
@@ -304,6 +311,7 @@ pthread_create(&listener_thread,NULL,listener,(void *)&client_comm);
 
 while(1)
 {
+
 //fetch commands and supply to server
 #if DEBUG == 1
 	printf("Client id %d: Command counter:%d\n",my_pid,command_counter);
