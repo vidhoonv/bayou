@@ -74,7 +74,8 @@ enum COMMAND_TYPE
 {
 	COMMAND_ADD=0,
 	COMMAND_DELETE=1,
-	COMMAND_EDIT=2
+	COMMAND_EDIT=2,
+        COMMAND_READ=3
 };
 struct COMMAND_ITEM
 {
@@ -82,6 +83,15 @@ struct COMMAND_ITEM
 	int timestamp;
 	enum COMMAND_TYPE command_type;
 	char command_data[BUFSIZE];
+};
+struct CMD_ITEM
+{
+	int command_id;
+	enum COMMAND_TYPE command_type;
+	char arg1[BUFSIZE];
+        char arg2[BUFSIZE];
+        char arg3[BUFSIZE];
+        char arg4[BUFSIZE];
 };
 enum LOG_CMD
 {

@@ -27,7 +27,88 @@ Authors:
 						strcat(STR,DELIMITER_CMD); \
 					}	\
 
+struct playlist
+{
+    int cmds[MAX_COMMANDS];
+    char song_name[BUFSIZE];
+    char song_url[BUFSIZE];
+};
 
+struct playlist client_playlist[MAX_COMMANDS];
+struct CMD_ITEM cmd_list[MAX_COMMANDS];
+
+int do_command(int command_id)
+{
+	
+	int i=0;
+	size_t len;
+        char *data;
+	
+	char sn[MAX_INPUT_LENGTH],su[MAX_INPUT_LENGTH];
+	char new_sn[MAX_INPUT_LENGTH],new_su[MAX_INPUT_LENGTH];
+	char record[2*MAX_INPUT_LENGTH];
+	int  op_arg;
+	bool fail=false;
+        
+        int cmd_type = cmd_list[command_id].command_type;
+        
+        
+
+	//printf("while doing command: acc:%s arg:%d\n",acc_name,op_arg);
+        //do commands on tentative data
+	switch(cmd_type)
+	{
+		case COMMAND_ADD:
+                    
+                    for(i=0;i<MAX_COMMANDS;i++)
+                    {
+                        if(strcmp("",client_playlist[i].song_name) == 0 && strcmp("",client_playlist[i].song_url) == 0)
+                        {
+                            //found entry
+                            strcpy(client_playlist[i].song_name,cmd_list[command_id].arg1);
+                            strcpy(client_playlist[i].song_url,cmd_list[command_id].arg2);
+                        }
+                    }
+					
+                                        break;
+		case COMMAND_DELETE:
+                    for(i=0;i<MAX_COMMANDS;i++)
+                    {
+                        if(strcmp(cmd_list[command_id].arg1,client_playlist[i].song_name) == 0 && strcmp(cmd_list[command_id].arg2,client_playlist[i].song_url) == 0)
+                        {
+                            //found entry
+                            strcpy(client_playlist[i].song_name,"");
+                            strcpy(client_playlist[i].song_url,"");
+                        }
+                    }
+									
+                                        break;
+		case COMMAND_EDIT:
+                    
+                     for(i=0;i<MAX_COMMANDS;i++)
+                    {
+                        if(strcmp(cmd_list[command_id].arg1,client_playlist[i].song_name) == 0 && strcmp(cmd_list[command_id].arg1,client_playlist[i].song_url) == 0)
+                        {
+                            //found entry
+                            strcpy(client_playlist[i].song_name,cmd_list[command_id].arg3);
+                            strcpy(client_playlist[i].song_url,cmd_list[command_id].arg4);
+                        }
+                    }
+					
+                                        break;
+		default:
+				printf("!!!some invalid command\n");
+				return -1;
+
+	}	
+return 0;
+
+}
+
+bool session_manager(int command_id)
+{
+    do_command(command_id);
+}
 int  get_next_command(int my_pid,int cmd_cnt, int *cmd_type,char *song_name, char *song_url,char *new_name, char *new_url)
 {
 	FILE *fp;
@@ -222,16 +303,39 @@ void* listener(void *arg)
 			recv_cmd_id = atoi(strtok_r(NULL,DELIMITER,&tok));
 
 			res = strtok_r(NULL,DELIMITER,&tok);
-                        if(cmd_res[recv_cmd_id] == -1 && strcpy(res,"SS") == 2)
-                        {
+                        //if(cmd_res[recv_cmd_id] == -1 && strcpy(res,"SS") == 2)
+                       // {
         			printf("recved msg from server content:%s for command %d  res:%s\n",data,recv_cmd_id,res);
                                 cmd_res[recv_cmd_id] = 1;
-			}
-	
+			//}
+                                //invoke session manager for tracking
+                                if(strcmp(res,"TS") == 0)
+                                {
+                                    session_manager(recv_cmd_id);
+                                }
+                                else if(strcmp(res,"SF") == 0)
+                                {
+                                    //update client local playlist
+                                }
 		}
 		
 	}
 	
+}
+bool check_tentative(int command_id,char *url)
+{
+    int i;
+    for(i=0;i<MAX_COMMANDS;i++)
+    {
+        if(strcmp(cmd_list[command_id].arg1, client_playlist[i].song_name)==0)
+        {
+            strcpy(url, client_playlist[i].song_url);
+            return true;
+        }
+    }
+    
+    return false;
+    
 }
 int main(int argc, char **argv)
 {
@@ -311,7 +415,6 @@ pthread_create(&listener_thread,NULL,listener,(void *)&client_comm);
 
 while(1)
 {
-
 //fetch commands and supply to server
 #if DEBUG == 1
 	printf("Client id %d: Command counter:%d\n",my_pid,command_counter);
@@ -324,12 +427,45 @@ while(1)
 		printf("End of command list... !\n");
 		break;
 	}
-
+        
 	CMD_DATA_PREP(song_name,song_url,new_name,new_url,command.command_data);
 	command.command_id = GET_NEXT_CMD_ID;
 	command.command_type = (enum COMMAND_TYPE) cmd_type;
+        cmd_list[command_counter].command_id = command.command_id;
+        cmd_list[command_counter].command_type = command.command_type ;
+        
+        //back up commands
+        strcpy(cmd_list[command.command_id].arg1,song_name);
+         strcpy(cmd_list[command.command_id].arg2,song_url);
+         if(command.command_type == 2)
+         {
+                strcpy(cmd_list[command.command_id].arg3,new_name);
+                strcpy(cmd_list[command.command_id].arg4,new_url);
+         }   
+         else
+         {
+             strcpy(cmd_list[command_counter].arg3,"");
+                strcpy(cmd_list[command_counter].arg4,"");
+         }
+         
 	command_counter++;
 
+        if(command.command_type ==  COMMAND_READ)
+        {
+            //check for tentative read
+            if(check_tentative(command.command_id,song_url))
+            {
+                //its a tentative read                
+                printf("doing tentative read:%s for command %d  \n",song_url,command.command_id);
+                //get result and print
+                continue;
+            }
+            else
+            {
+                //its something else
+                printf("you are not reading your write %d\n",command.command_id);
+            }
+        }
 	//sending command to client
 	strcpy(send_buff,"REQUEST");
 	strcat(send_buff,DELIMITER);
