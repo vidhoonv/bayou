@@ -6,7 +6,7 @@ BAYOU protocol
 
 Authors:
 @Vidhoon Viswanathan
-@Layamrudha RV
+@Layamrudhaa RV
 
 */
 #include "butypes.h"
@@ -1194,6 +1194,7 @@ int main(int argc, char **argv)
 	int primary_mode = 0;
 	int retire_command=-1;
 	bool retire = false;
+        bool recv_retire = false;
 
 //comm common
 	struct sockaddr_storage temp_paddr;
@@ -1237,7 +1238,7 @@ int main(int argc, char **argv)
 	struct sigevent sevp;
 	clockid_t clkid =  CLOCK_REALTIME;
 	struct itimerspec entropy_timer_val,old_val;
-	int tret = 0;
+	int tret = 0; int mode =0;
 	int ent_list[MAX_SERVERS];
 //check runtime arguments
 	if(argc!=5)
@@ -1458,7 +1459,11 @@ else
 				//recved from client
 				//expects data in the format
 				//REQUEST:<CLIENT_ID>:<COMMAND_STR>:
-
+                            if(retire)
+                            {
+                                //ignore client requests if decided to retire
+                                continue;
+                            }
 				//retrive command string
 				cstr = strtok(NULL,DELIMITER);
 				strcpy(command_str,cstr);
@@ -1517,11 +1522,13 @@ else
 				if(command_counter == retire_command)
 				{
 					retire = true;
-					//<current_time>:<SERVER_ID>:
+					//<current_time>:<SERVER_ID>:<primary_mode>
 					sprintf(log_record,"%d",my_current_time);
 					strcat(log_record,DELIMITER);
 					strcat(log_record,my_id_str);
 					strcat(log_record,DELIMITER);
+                                        sprintf(log_record,"%d",primary_mode);
+                                        strcat(log_record,DELIMITER);
 					//write retire log
 					rlog_command(LOG_ADD,my_pid,log_record);
 				}
@@ -1573,36 +1580,61 @@ else
 				{
 
 					printf("new server - no version vector entries found!\n");
-				}				
+				}
+
+                                //update my version vector for possible retired servers
+                                for(i=0;i<recv_vv.server_count;i++)
+                                {
+                                    if(recv_vv.recent_timestamp[i] == -1)
+                                    {
+                                        //distinguish server retirement from server unknown
+                                        //find recv_vv.servers[i] parent server id
+                                        //find recv.vv.servers[parent(i)].recent_timestamp
+                                        //if above entity is >= than recv_vv.servers[i]'s creation timestamp
+                                        // then recv_vv.servers[i] has retired
+                                        copy_serverID(&serv,recv_vv.servers[i]);
+                                        serv.id[serv.level] = -1;
+                                        serv.level = serv.level -1;
+                                        
+                                        //serv contains parent id
+                                        
+                                        for(j=0;j<recv_vv.server_count;j++)
+                                        {
+                                                if(equal_serverID(recv_vv.servers[j],serv))
+                                                {
+                                                       //check time stamp of parent against creation time stamp of parent
+                                                    if(recv_vv.recent_timestamp[j] >= recv_vv.servers[i].id[recv_vv.servers[i].level])
+                                                    {
+                                                        //recv_vv.servers[i] has retired
+                                                         for(k=0;k<my_version_vector.server_count;k++)
+                                                         {
+                                                                if(equal_serverID(my_version_vector.servers[k],recv_vv.servers[i]))
+                                                                {
+                                                                        my_version_vector.recent_timestamp[k] = -1;
+                                                                        my_version_vector.servers[k].level = -1;
+                                                                        printf("!!!detected retirement\n");
+                                                                }
+                                                         }       
+                                                    }
+                                                    else
+                                                    {
+                                                        //recv_vv.servers[i] has not retired
+                                                    }
+                                                    break;
+                                                }
+				
+                                        }
+                                        
+                                        
+                                        
+                                    }    
+                                }
+                                
 				if(process_logs(recv_vv,my_version_vector,recv_pid,my_pid,retire)) 
 				{
 
 					printf("anti entropy messages sent!\n");
-/*
-					PREPARE_VVSTR();
 
-					//send entropy
-					//sending create entropy to client
-					strcpy(send_buff,"ENTROPY");
-					strcat(send_buff,DELIMITER);
-					sprintf(send_buff,"%s%d",send_buff,my_pid);
-					strcat(send_buff,DELIMITER);
-					strcat(send_buff,log_str);
-					strcat(send_buff,DELIMITER);
-	
-	
-					printf("Server %d: Sending entropy  to SERVER %d \n",my_pid,recv_pid);
-					ret = sendto(TALKER, send_buff, strlen(send_buff), 0, 
-  								(struct sockaddr *)&server_addr[recv_pid], server_addr_len[recv_pid]);
-					
-					if (ret < 0)
-					{
-						perror("sendto ");
-	      					close(TALKER);
-					}
-					//cleanup
-					strcpy(log_str,"");
-*/
 				}
 
 				else
@@ -1808,12 +1840,23 @@ else
 			}
 			else if(strcmp(data,"RETIRED") == 0)
 			{
+                                recv_retire = true;
+                                if(recv_pid > my_pid)
+                                    continue;
+                                else
+                                {    
+                                    retire=false;
+                                }    
 				data = strtok(NULL,DELIMITER);
 				if(data)
 					ts = atoi(data);
 
 				idstr = strtok(NULL,DELIMITER);
 				EXTRACT_SERVERID(idstr,serv,DELIMITER_SEC);
+                                
+                                data = strtok(NULL,DELIMITER);
+                                if(data)
+                                    mode = atoi(data);
                                 //update my time
                                 my_current_time = max(ts+1,my_current_time);
 				//updating timestamp
@@ -1830,7 +1873,8 @@ else
 				
 				}
 				//check if the retired node is primary and update primary mode accordingly
-				primary_mode = 1; //wrong
+                                if(mode == 1)
+                                        primary_mode = 1; 
 				//remove from ent_list
 				ent_list[recv_pid] = -1;
 				//move all tentative writes to stable writes --> happens automatically on calling update_resources after entropy completion

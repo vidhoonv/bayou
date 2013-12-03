@@ -6,7 +6,7 @@ BAYOU protocol
 
 Authors:
 @Vidhoon Viswanathan
-@Layamrudha RV
+@Layamrudhaa RV
 
 */
 #include "butypes.h"
@@ -199,7 +199,7 @@ void* listener(void *arg)
 			temp_paddr_len = sizeof(temp_paddr);
 			nread = recvfrom (client_comm->comm_fd[LISTENER_INDEX], recv_buff, BUFSIZE, 0, 
                	       			(struct sockaddr *)&temp_paddr, &temp_paddr_len); 
-                        printf("received something\n");
+                        
 		 	if (nread < 0)
 		       	{
 		        	perror("recvfrom ");
@@ -207,7 +207,7 @@ void* listener(void *arg)
             			return NULL;
         		}		
 			recv_buff[nread] = 0;
-  			printf("received: %s\n", recv_buff);
+  			//printf("received: %s\n", recv_buff);
 
 			strcpy(buff_copy,recv_buff);			
 			data = strtok_r(buff_copy,DELIMITER,&tok);
@@ -218,7 +218,7 @@ void* listener(void *arg)
 
 			res = strtok_r(NULL,DELIMITER,&tok);
 
-			//printf("recved msg from server content:%s for command %d  res:%s\n",data,recv_cmd_id,res);
+			printf("recved msg from server content:%s for command %d  res:%s\n",data,recv_cmd_id,res);
 			
 	
 		}
@@ -305,10 +305,6 @@ pthread_create(&listener_thread,NULL,listener,(void *)&client_comm);
 while(1)
 {
 //fetch commands and supply to server
-    if(my_pid == 1 && command_counter == 1)
-    {
-        sleep(30);
-    }
 #if DEBUG == 1
 	printf("Client id %d: Command counter:%d\n",my_pid,command_counter);
 #endif
