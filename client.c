@@ -59,7 +59,7 @@ int do_command(int command_id)
 	switch(cmd_type)
 	{
 		case COMMAND_ADD:
-                    
+                  
                     for(i=0;i<MAX_COMMANDS;i++)
                     {
                         if(strcmp("",client_playlist[i].song_name) == 0 && strcmp("",client_playlist[i].song_url) == 0)
@@ -67,6 +67,7 @@ int do_command(int command_id)
                             //found entry
                             strcpy(client_playlist[i].song_name,cmd_list[command_id].arg1);
                             strcpy(client_playlist[i].song_url,cmd_list[command_id].arg2);
+                            break;
                         }
                     }
 					
@@ -79,6 +80,7 @@ int do_command(int command_id)
                             //found entry
                             strcpy(client_playlist[i].song_name,"");
                             strcpy(client_playlist[i].song_url,"");
+                            break;
                         }
                     }
 									
@@ -92,8 +94,25 @@ int do_command(int command_id)
                             //found entry
                             strcpy(client_playlist[i].song_name,cmd_list[command_id].arg3);
                             strcpy(client_playlist[i].song_url,cmd_list[command_id].arg4);
+                            break;
                         }
                     }
+                     if(i==MAX_COMMANDS)
+                     {
+                         //could not find entry in local playlist
+                         //ADD new entry to playlist
+                         
+                        for(i=0;i<MAX_COMMANDS;i++)
+                         {
+                                if(strcmp("",client_playlist[i].song_name) == 0 && strcmp("",client_playlist[i].song_url) == 0)
+                                {
+                                //found entry
+                                     strcpy(client_playlist[i].song_name,cmd_list[command_id].arg3);
+                                    strcpy(client_playlist[i].song_url,cmd_list[command_id].arg4);
+                                         break;
+                                }
+                        }
+                     }
 					
                                         break;
 		default:
@@ -157,13 +176,23 @@ int  get_next_command(int my_pid,int cmd_cnt, int *cmd_type,char *song_name, cha
 	{
 		*cmd_type = 2;
 	}
+        else if(strcmp(data,"COMMAND_READ") == 0)
+	{
+		*cmd_type = 3;
+	}
 	op_args = strtok_r(NULL,DELIMITER_CMD,&tok);
 
 	if(op_args)
 	{
 		strcpy(song_name,strtok_r(op_args,DELIMITER_ARGS,&tok));
-		strcpy(song_url,strtok_r(NULL,DELIMITER_ARGS,&tok));
-
+                if(*cmd_type == 3)
+                {
+                    //do nothing
+                }
+                else
+                {
+                        strcpy(song_url,strtok_r(NULL,DELIMITER_ARGS,&tok));
+                }
 		if(*cmd_type == 2)
 		{
 			strcpy(new_name,strtok_r(NULL,DELIMITER_ARGS,&tok));
@@ -239,6 +268,25 @@ bool configure_client(int my_pid,struct COMM_DATA *comm_client)
 return true;
 }
 
+bool remove_tentative_entry(int command_id)
+{
+    int i;
+    
+    if(cmd_list[command_id].command_type == COMMAND_EDIT)
+    {
+      for(i=0;i<MAX_COMMANDS;i++)
+                    {
+                        if(strcmp(cmd_list[command_id].arg3,client_playlist[i].song_name) == 0 && strcmp(cmd_list[command_id].arg4,client_playlist[i].song_url) == 0)
+                        {
+                            //found entry
+                            strcpy(client_playlist[i].song_name,cmd_list[command_id].arg1);
+                            strcpy(client_playlist[i].song_url,cmd_list[command_id].arg2);
+                            break;
+                        }
+                    }
+    }
+}
+
 void* listener(void *arg)
 {
 //comm listening variables
@@ -293,7 +341,7 @@ void* listener(void *arg)
             			return NULL;
         		}		
 			recv_buff[nread] = 0;
-  			printf("received: %s\n", recv_buff);
+  			//printf("received: %s\n", recv_buff);
 
 			strcpy(buff_copy,recv_buff);			
 			data = strtok_r(buff_copy,DELIMITER,&tok);
@@ -303,19 +351,25 @@ void* listener(void *arg)
 			recv_cmd_id = atoi(strtok_r(NULL,DELIMITER,&tok));
 
 			res = strtok_r(NULL,DELIMITER,&tok);
-                        //if(cmd_res[recv_cmd_id] == -1 && strcpy(res,"SS") == 2)
-                       // {
+                        if(cmd_res[recv_cmd_id] == -1 && strcmp(res,"SS") == 0)
+                        {
         			printf("recved msg from server content:%s for command %d  res:%s\n",data,recv_cmd_id,res);
                                 cmd_res[recv_cmd_id] = 1;
-			//}
+			}
                                 //invoke session manager for tracking
-                                if(strcmp(res,"TS") == 0)
+                                if(strcmp(res,"TS") == 0 || strcmp(res,"SS") == 0)
                                 {
+                                   // printf("received  success %s\n",res);
                                     session_manager(recv_cmd_id);
                                 }
                                 else if(strcmp(res,"SF") == 0)
                                 {
                                     //update client local playlist
+                                    remove_tentative_entry(recv_cmd_id);
+                                }
+                                else
+                                {
+                                    //printf("received something else %s%d",res,strcmp(res,"TS"));
                                 }
 		}
 		
@@ -326,7 +380,7 @@ bool check_tentative(int command_id,char *url)
 {
     int i;
     for(i=0;i<MAX_COMMANDS;i++)
-    {
+    {  // printf("%s\n",client_playlist[i].song_name);
         if(strcmp(cmd_list[command_id].arg1, client_playlist[i].song_name)==0)
         {
             strcpy(url, client_playlist[i].song_url);
@@ -344,7 +398,7 @@ int main(int argc, char **argv)
 	struct hostent *hp;
 	char hostname[64];
 	struct COMM_DATA client_comm;
-
+        
 	struct sockaddr_in *server_addr_in[MAX_SERVERS];
 	struct sockaddr server_addr[MAX_SERVERS];
 	socklen_t server_addr_len[MAX_SERVERS];
@@ -370,16 +424,36 @@ int main(int argc, char **argv)
 	pthread_t listener_thread;
 	
 //misc
-	int i=0,ret=0;
+	int i=0,ret=0,k=0;
+        char *data,*tok1,*tok2;    
+        int my_server;
+//runtime commands
+        char join_map[BUFSIZE];
+        int disjoin_command[MAX_COMMANDS/100];
+        int new_parent[MAX_COMMANDS/100];
+ 
 //check runtime arguments
-	if(argc!=2)
+	if(argc!=4)
 	{
-		printf("Usage: ./client <client_id> \n");
+		printf("Usage: ./client <client_id> <def_server> <join_ins>\n");
 		return -1;
 	}
-	
+	for(i=0;i<MAX_COMMANDS/100;i++)
+            disjoin_command[i] = -1;
 	my_pid = atoi(argv[1]);
-
+        my_server = atoi(argv[2]);
+        strcpy(join_map,argv[3]);
+        data = strtok_r(join_map,DELIMITER,&tok1);
+        k=0;
+        while(data)
+        {
+                        
+                        disjoin_command[k] = atoi(strtok_r(data,DELIMITER_SEC,&tok2));
+                        new_parent[k] = atoi( strtok_r(NULL,DELIMITER_SEC,&tok2));
+                        k++; 
+                        data = strtok_r(NULL,DELIMITER,&tok1);
+        }
+        //
 
 	 //hostname configuration
 	gethostname(hostname, sizeof(hostname));
@@ -412,9 +486,17 @@ int main(int argc, char **argv)
 
 //create listener thread
 pthread_create(&listener_thread,NULL,listener,(void *)&client_comm);	
-
+k=0;
 while(1)
 {
+  
+    if(disjoin_command[k] != -1 && disjoin_command[k] == command_counter)
+    {
+       
+        my_server = new_parent[k++]; 
+         printf("Switching to server %d\n",my_server);
+    }
+
 //fetch commands and supply to server
 #if DEBUG == 1
 	printf("Client id %d: Command counter:%d\n",my_pid,command_counter);
@@ -431,12 +513,19 @@ while(1)
 	CMD_DATA_PREP(song_name,song_url,new_name,new_url,command.command_data);
 	command.command_id = GET_NEXT_CMD_ID;
 	command.command_type = (enum COMMAND_TYPE) cmd_type;
-        cmd_list[command_counter].command_id = command.command_id;
-        cmd_list[command_counter].command_type = command.command_type ;
+        cmd_list[command.command_id].command_id = command.command_id;
+        cmd_list[command.command_id].command_type = command.command_type ;
         
         //back up commands
         strcpy(cmd_list[command.command_id].arg1,song_name);
+        if(command.command_type == 3)
+        {
+            strcpy(cmd_list[command.command_id].arg2,"");
+        }
+        else
+        {
          strcpy(cmd_list[command.command_id].arg2,song_url);
+        }
          if(command.command_type == 2)
          {
                 strcpy(cmd_list[command.command_id].arg3,new_name);
@@ -444,8 +533,8 @@ while(1)
          }   
          else
          {
-             strcpy(cmd_list[command_counter].arg3,"");
-                strcpy(cmd_list[command_counter].arg4,"");
+             strcpy(cmd_list[command.command_id].arg3,"");
+                strcpy(cmd_list[command.command_id].arg4,"");
          }
          
 	command_counter++;
@@ -458,13 +547,15 @@ while(1)
                 //its a tentative read                
                 printf("doing tentative read:%s for command %d  \n",song_url,command.command_id);
                 //get result and print
-                continue;
+               
             }
             else
             {
                 //its something else
                 printf("you are not reading your write %d\n",command.command_id);
+               
             }
+             continue;
         }
 	//sending command to client
 	strcpy(send_buff,"REQUEST");
@@ -482,9 +573,9 @@ while(1)
 	strcpy(cmd_str,"");
 
 	printf("Command details: id:%d type:%d data:%s \n",command.command_id,command.command_type,command.command_data);	
-	printf("Client %d: Sending commmand %d to SERVER %d \n",my_pid,command.command_id,MYSERVER(my_pid));
+	printf("Client %d: Sending commmand %d to SERVER %d \n",my_pid,command.command_id,my_server);
 	ret = sendto(TALKER, send_buff, strlen(send_buff), 0, 
-  			(struct sockaddr *)&server_addr[MYSERVER(my_pid)], server_addr_len[MYSERVER(my_pid)]);
+  			(struct sockaddr *)&server_addr[my_server], server_addr_len[my_server]);
 					
 	if (ret < 0)
 	{

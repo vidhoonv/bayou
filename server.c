@@ -18,6 +18,10 @@ Authors:
 			printf("\nIN PERFORM COMMAND %d\n",command.command_id); \
 			rc = do_command(0,my_pid,command.command_type,command.command_data);	\
 			printf("\n>>>>>>>>Performed command %d res:%d\n",command.command_id,rc); \
+                        if(primary_mode == 1 && rc==0)   \
+                                rc = 2; \
+                        else if(primary_mode == 1 && rc==-1)    \
+                                rc = -2;        \
 			respond(my_pid,TALKER,command.command_id,client_addr[command.command_id%MAX_CLIENTS],client_addr_len[command.command_id%MAX_CLIENTS],rc);	
 
 #define PREPARE_IDSTR(serverid,STR,DL)	\
