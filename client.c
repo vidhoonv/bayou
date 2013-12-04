@@ -431,11 +431,12 @@ int main(int argc, char **argv)
         char join_map[BUFSIZE];
         int disjoin_command[MAX_COMMANDS/100];
         int new_parent[MAX_COMMANDS/100];
+        int pause_mode=0;
  
 //check runtime arguments
-	if(argc!=4)
+	if(argc!=5)
 	{
-		printf("Usage: ./client <client_id> <def_server> <join_ins>\n");
+		printf("Usage: ./client <client_id> <def_server> <join_ins> <pause_mode>\n");
 		return -1;
 	}
 	for(i=0;i<MAX_COMMANDS/100;i++)
@@ -443,6 +444,7 @@ int main(int argc, char **argv)
 	my_pid = atoi(argv[1]);
         my_server = atoi(argv[2]);
         strcpy(join_map,argv[3]);
+        pause_mode = atoi(argv[4]);
         data = strtok_r(join_map,DELIMITER,&tok1);
         k=0;
         while(data)
@@ -489,7 +491,13 @@ pthread_create(&listener_thread,NULL,listener,(void *)&client_comm);
 k=0;
 while(1)
 {
-  
+    if(pause_mode)
+    {
+        printf("=====>paused\n");
+         getchar();
+         
+    }
+ 
     if(disjoin_command[k] != -1 && disjoin_command[k] == command_counter)
     {
        

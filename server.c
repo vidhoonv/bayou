@@ -98,6 +98,26 @@ char log_str[BUFSIZE];
 	socklen_t server_addr_len[MAX_SERVERS],client_addr_len[MAX_CLIENTS];	
 
 struct COMM_DATA server_comm;
+int command_counter = 0;
+
+//run time args
+int pause_mode=0;
+bool paused=false;
+bool blocked=false;
+//isolate run time arg
+char isolate_list[BUFSIZE];
+int isolate_cmd_list[MAX_COMMANDS];
+int isolate_counter=0;
+bool isolated=false;
+//reconnect run time arg
+char reconnect_list[BUFSIZE];
+int reconnect_cmd_list[MAX_COMMANDS];
+int reconnect_counter=0;
+
+//breakconnection and recoverconnection 
+int break_cmd_list[MAX_COMMANDS][MAX_SERVERS]; //contains list of servers with which connection shd be disconnected after command 'i' at break_cmd_list[i]
+int reconn_cmd_list[MAX_COMMANDS][MAX_SERVERS];//contains list of servers with which connection shd be restored after command 'i' at reconn_cmd_list[i]
+bool broken_connection[MAX_SERVERS];
 
 bool equal_serverID(struct SERVER_ID s1,struct SERVER_ID s2)
 {
@@ -951,7 +971,31 @@ void init_anti_entropy(union sigval args)
 	printf("timer expired\n");
 	
 	PREPARE_VVSTR();
-
+        //run time command processing
+        if(pause_mode)
+        {   
+            if(paused)
+            {
+                 printf("\n=====>paused so returning without init anti entropy\n");
+                return;
+                
+            }
+            
+        }
+        
+        if(command_counter == reconnect_cmd_list[reconnect_counter])
+        {
+            if(isolated)
+            {
+                printf("\n\nserver reconnected\n");
+                isolate_counter++;
+                  reconnect_counter++;
+                  isolated=false;
+            }
+                  
+        }
+        if(isolated)
+                  return; //ignore doing anti entropy during isolation
 	printf("\n\ntimer expired %s!!!\n",log_str);
 	//send ENTROPY
 	strcpy(send_buff,"ENTROPY");
@@ -965,6 +1009,10 @@ void init_anti_entropy(union sigval args)
 	{
 	if(*(sender_id+k) == 1)
 	{
+            if(broken_connection[k] )
+            {
+                            continue; //DO NOT send anti entropy to currently disconnected servers
+            }
 		printf("Server %d: Sending entropy  to SERVER %d \n",my_pid,k);
 		ret = sendto(server_comm->comm_fd[TALKER_INDEX], send_buff, strlen(send_buff), 0, 
   			(struct sockaddr *)&server_addr[k], server_addr_len[k]);
@@ -978,6 +1026,9 @@ void init_anti_entropy(union sigval args)
 	}
 	//cleanup
 	strcpy(log_str,"");
+        if(pause_mode)
+            paused=true;
+            
 	
 }
 
@@ -1269,11 +1320,11 @@ int main(int argc, char **argv)
 //commands
 	struct COMMAND_ITEM command_list[MAX_COMMANDS];
 	struct COMMAND_ITEM command;
-	int command_counter = 0;
+	
 //misc
 	int i,j,k=0,ret=0,recv_pid;
 	char buff_copy[BUFSIZE];
-	char *data,*cstr,*cmd_str,*tok,*tok1,*tok2,*idstr,*id_data,*vv_str,*vv_data;
+	char *data,*data1,*cstr,*cmd_str,*tok,*tok1,*tok2,*idstr,*id_data,*vv_str,*vv_data;
 	char command_str[BUFSIZE/2];
 	char log_record[BUFSIZE];
 	void *entropy_data;
@@ -1293,17 +1344,104 @@ int main(int argc, char **argv)
 	struct itimerspec entropy_timer_val,old_val;
 	int tret = 0; int mode =0;
 	int ent_list[MAX_SERVERS];
+
+//run time arg strings
+        char break_conn_str[BUFSIZE];
+        char reconn_str[BUFSIZE];
+        int break_cmd=-1,rec_cmd=-1;
+        for(i=0;i<MAX_COMMANDS;i++)
+        {
+            isolate_cmd_list[i] = -1;
+            reconnect_cmd_list[i] = -1;
+        }
+        
+        for(i=0;i<MAX_COMMANDS;i++)
+        {
+            for(k=0;k<MAX_SERVERS;k++)
+            {
+                break_cmd_list[i][k]=-1;
+                reconn_cmd_list[i][k]=-1;
+            }
+        }
+         for(k=0;k<MAX_SERVERS;k++)
+          {
+             broken_connection[k] =false;
+         }
+        
 //check runtime arguments
-	if(argc!=5)
+	if(argc!=10)
 	{
-		printf("Usage: ./server <server_id> <parent_id> <primary_mode> <retire_command>\n");
+		printf("Usage: ./server <server_id> <parent_id> <primary_mode> <retire_command> <isolate_list> <reconnect_list> <break_list> <reconn_list> <pause_mode>\n");
 		return -1;
 	}
+//setting up run time env
 	my_pid=atoi(argv[1]);
 	parent_id=atoi(argv[2]);
 	primary_mode=atoi(argv[3]); // 0 default
 	retire_command=atoi(argv[4]); //-1 default
-
+        strcpy(isolate_list,argv[5]);
+        strcpy(reconnect_list,argv[6]);
+        strcpy(break_conn_str,argv[7]);
+        strcpy(reconn_str,argv[8]);
+        pause_mode=atoi(argv[9]);
+        
+        //fetch command list for isolation
+        data = strtok(isolate_list,DELIMITER);
+        k=0;
+        while(data)
+        {
+            isolate_cmd_list[k++]=atoi(data);
+            data = strtok(NULL,DELIMITER);
+        }
+        k=0;
+        
+         //fetch command list for reconnection
+        data = strtok(reconnect_list,DELIMITER);
+        k=0;
+        while(data)
+        {
+            reconnect_cmd_list[k++]=atoi(data);
+            data = strtok(NULL,DELIMITER);
+        }
+        k=0;
+        
+        //fetch command list for break connection
+        data = strtok_r(break_conn_str,DELIMITER,&tok);
+        i=0;k=0;
+        while(data)
+        {
+            break_cmd = atoi(strtok_r(data,DELIMITER_SEC,&tok1));
+            data1 = strtok_r(NULL,DELIMITER_SEC,&tok1);
+            while(data1)
+            {
+                break_cmd_list[break_cmd][k++] = atoi(data1);
+                data1 = strtok_r(NULL,DELIMITER_SEC,&tok1);
+            }
+            data = strtok_r(NULL,DELIMITER,&tok);
+        }
+       
+        //fetch command list for restore connection
+        data = strtok_r(reconn_str,DELIMITER,&tok);
+        i=0;k=0;
+        while(data)
+        {
+            rec_cmd = atoi(strtok_r(data,DELIMITER_SEC,&tok1));
+            data1 = strtok_r(NULL,DELIMITER_SEC,&tok1);
+            while(data1)
+            {
+                reconn_cmd_list[rec_cmd][k++] = atoi(data1);
+                data1 = strtok_r(NULL,DELIMITER_SEC,&tok1);
+            }
+            data = strtok_r(NULL,DELIMITER,&tok);
+        }
+             printf("\n\nbreak %d reconn  %d",break_cmd_list[1][0],reconn_cmd_list[3][0]);
+        k=0;
+        while(data)
+        {
+            reconnect_cmd_list[k++]=atoi(data);
+            data = strtok(NULL,DELIMITER);
+        }
+        k=0;
 	//hostname configuration
 	gethostname(hostname, sizeof(hostname));
 	hp = gethostbyname(hostname);
@@ -1438,7 +1576,26 @@ else
         		}		
 			recv_buff[nread] = 0;
   			printf("received: %s\n", recv_buff);
-
+//run time arguments processing
+                        if(pause_mode)
+                        {
+                             printf("\n=====>paused\n");
+                             paused = true;
+                              getchar();
+                              paused=false;
+                        }
+                        if(command_counter == reconnect_cmd_list[reconnect_counter])
+                        {
+                            if(isolated)
+                            {
+                                printf("SERVER RECONNECTED");
+                                isolate_counter++;
+                                reconnect_counter++;
+                                isolated=false;
+                            }
+                                
+                        }
+                       
 			strcpy(buff_copy,recv_buff);			
 			data = strtok(buff_copy,DELIMITER);
 
@@ -1447,7 +1604,11 @@ else
 #if DEBUG==1
 				printf("recved msg from %d\n",recv_pid);
 #endif		
-
+                        if(broken_connection[recv_pid] && (strcmp(data,"REQUEST") != 0) )
+                        {
+                            printf("\n\n!!!!!! msg from disconnected SERVER %d - ignoring\n\n",recv_pid);
+                            continue; //ignore msgs to simulate broken connection
+                        }
 			if(strcmp(data,"CREATE") == 0)	
 			{
 				//received from parent server
@@ -1601,8 +1762,40 @@ else
 				}
                                 my_current_time++; //update current time
                        
-				
+				if(command_counter == isolate_cmd_list[isolate_counter])
+                                {
+                                    isolated=true; //ignore msgs that come during isolation
+                                    printf("\n\nSERVER ISOLATED\n");
+                                }
+                                //breaking connections
+                                if(break_cmd_list[command_counter][0] != -1 )
+                                {
+                                   
+                                    for(k=0;k<MAX_SERVERS;k++)
+                                    {
+                                        if(break_cmd_list[command_counter][k] != -1)
+                                        {
+                                            printf("\n\n!!!!!! DISCONNECTING SERVER %d\n\n",break_cmd_list[command_counter][k]);
+                                            broken_connection[break_cmd_list[command_counter][k]]=true;
+                                        }
+                                    }
+                                }
+                                //restoring connections
+                                if(reconn_cmd_list[command_counter][0] != -1)
+                                {
+                                    for(k=0;k<MAX_SERVERS;k++)
+                                    {
+                                        if(reconn_cmd_list[command_counter][k] != -1)
+                                        {
+                                             printf("\n\n!!!!!! RECONNECTING SERVER %d\n\n",reconn_cmd_list[command_counter][k]);
+                                            broken_connection[reconn_cmd_list[command_counter][k]]=false;
+                                        }
+                                    }
+                                }
+                                        
 			}
+                        else if(isolated)
+                            continue; 
 			else if(strcmp(data,"ENTROPY") == 0)
 			{
 				//recved from server

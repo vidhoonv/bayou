@@ -38,7 +38,7 @@
 #define DELIMITER_CMD "-"
 #define DELIMITER_ARGS "/"  //used only for command list (input file)
 
-#define MAX_CLIENTS 2
+#define MAX_CLIENTS 3
 #define MAX_SERVERS 3
 #define MAX_LEVELS 100
 #define CLIENT_PORT_STARTER 6000
